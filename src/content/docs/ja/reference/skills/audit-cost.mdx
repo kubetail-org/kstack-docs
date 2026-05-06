@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: 'リソースの無駄と適切なサイジングの推奨事項。'
+---
+
+`/audit-cost` スキルは、過剰プロビジョニングされたワークロードを検索します。
+
+引数なしで実行するとフルスイープ、ワークフロー名を指定するとレポートのスコープを絞り込めます。
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+自然言語スコープ（Namespace、ラベルセレクター、ワークロード名）はすべてのワークフローでサポートされています（[概要](/ja/reference/skills/overview/)を参照）。
+
+---
+
+## ワークフロー
+
+### 1. CPU・メモリのリクエスト対実際の使用量
+
+:::note[チェック項目]
+- `resources.requests` が観測されたp95使用量を大幅に上回るコンテナ
+- `resources.requests` がまったく設定されていないコンテナ
+- メモリ制限に達しているコンテナ（ウィンドウ内のOOMKill）
+:::
+
+ソース：ライブ使用量は `metrics-server`、履歴p95が検出された場合はPrometheus。
+
+### 2. アイドルワークロード
+
+:::note[チェック項目]
+- ウィンドウ内でトラフィックがゼロ、CPUがほぼゼロのDeploymentおよびStatefulSet
+- 忘れ去られるほど長期間失敗または中断されているJobおよびCronJob
+:::
+
+ソース：`metrics-server` およびJob/CronJobステータス用のKubernetes API。
+
+### 3. 未使用のストレージとロードバランサー
+
+:::note[チェック項目]
+- `Released` 状態のPersistentVolume、およびバインドされているがどのPodにもマウントされていないPVC
+- エンドポイントがない `LoadBalancer` タイプの `Service` オブジェクト
+:::
+
+ソース：Kubernetes API。
+
+---
+
+## ウィンドウ
+
+適切なサイジングには履歴が必要です。デフォルトでは、Prometheusが利用可能な場合は7日間遡り、利用できない場合はライブの `metrics-server` スナップショットにフォールバックします。レポートには常に使用されたソースとデータの参照期間が記載されます。
+
+---
+
+## エージェントへの指示
+
+ワークフロー自体に加えて、スキルはエージェントにレポートの方法を指示します。
+
+- ヘッダーにソース（ライブは `metrics-server`、履歴はPrometheus）と有効な参照期間を記載します — Prometheusの保持期間はデフォルトの7日より短い場合があります。
+- `metrics-server` のみが存在する場合、Prometheusを必要とする検出結果を黙って削除するのではなく「利用不可」としてマークします。
+- 実際に問題となるほど大きなリクエストと使用量のギャップのみをフラグします。小さなデルタはノイズです。
+- ユーザーが特定のワークロードの基礎となるシリーズを確認したい場合は [`/metrics`](/ja/reference/skills/metrics/) に渡します。

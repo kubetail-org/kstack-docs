@@ -1,0 +1,74 @@
+---
+title: /logs
+description: "Récupération et filtrage de logs de conteneurs via le grep côté nœud de Kubetail — diffusés dans un volet tmux partagé avec l'agent."
+---
+
+Le Skill `/logs` est un outil de récupération de logs assisté par IA. Décrivez ce que vous cherchez et l'agent trouvera les bons pods, choisira la fenêtre temporelle appropriée et utilisera le meilleur filtre grep pour ne récupérer que les lignes qui comptent.
+
+Pour récupérer les logs efficacement, ce Skill enseigne à l'agent comment utiliser [Kubetail](https://github.com/kubetail-org/kubetail), qui s'appuie sur un agent de cluster (un agent K8s classique, pas un agent IA) basé sur Rust, tournant sur chaque nœud pour effectuer le filtrage à distance plutôt que localement. Cela permet de rechercher rapidement sur de nombreux pods et de longues fenêtres temporelles sans rapatrier des gigaoctets de données au préalable.
+
+Le flux s'exécute dans une fenêtre **tmux** à laquelle vous et l'agent êtes attachés simultanément. L'agent lit le volet pour répondre à vos questions, et vous pouvez faire défiler, rechercher ou continuer à observer le tail en direct en temps réel.
+
+```text
+/logs                                     # prompts for a target
+/logs api                                 # recent logs from the api workload
+/logs errors from the last hour on api    # natural-language scoping
+/logs checkout for "timeout" in last 15m
+```
+
+Le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads, fenêtres temporelles, patterns grep) est pris en charge (voir [Overview](/fr/reference/skills/overview/)). L'agent traduit votre description en requête Kubetail appropriée.
+
+:::caution[Sécurité]
+Les logs de conteneurs contiennent fréquemment des données sensibles — secrets, tokens, corps de requêtes, PII. Tout ce qui est visible dans le volet est lu par l'agent et peut être envoyé au modèle. Affinez les requêtes avec précision (workload spécifique, fenêtre temporelle courte, grep ciblé) et privilégiez la rédaction à la source plutôt que le filtrage après coup. Voir [Sécurité](/fr/concepts/security/) pour le modèle de confiance complet.
+:::
+
+---
+
+## Prérequis
+
+- `tmux` doit être disponible dans le `$PATH` de l'agent. Le Skill ne fonctionnera pas sans lui.
+- Kubetail doit être installé dans le cluster. S'il ne l'est pas, le Skill proposera de l'installer via le chart Helm de Kubetail (voir le [guide d'installation](https://docs.kubetail.com/guides/cluster/installation) pour le chemin manuel).
+
+---
+
+## Ouverture d'une session de logs
+
+Une fois que l'agent a résolu la cible et construit la requête Kubetail, il :
+
+1. Démarre une session tmux détachée avec un nom descriptif (ex. `kstack-logs-api-server`).
+2. Tente d'ouvrir une nouvelle fenêtre de terminal sur votre bureau et d'y attacher la session — pour que le flux apparaisse directement devant vous.
+3. Affiche la commande `tmux attach` exacte dans le chat, pour que vous puissiez vous connecter manuellement depuis n'importe quel terminal (utile via SSH, dans un éditeur distant, ou si l'ouverture de fenêtre échoue).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-logs-api-server
+```
+
+Vous et l'agent partagez le même volet. L'agent lit la fenêtre de façon conservatrice pour économiser des tokens — vous devrez peut-être le relancer pour qu'il prenne en compte les dernières sorties. Dites à l'agent de fermer la session et il arrêtera le tail sous-jacent et tuera la session tmux.
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Au-delà de l'ouverture du flux, le Skill instruit l'agent sur le comportement à adopter :
+
+- Traduire la description de l'utilisateur en la requête Kubetail la plus étroite viable — workload spécifique, fenêtre temporelle courte, grep ciblé — et afficher la requête résolue pour que l'utilisateur puisse l'affiner avant le démarrage du flux.
+- Lire le volet tmux de façon conservatrice pour économiser des tokens ; inviter l'utilisateur à faire défiler plutôt que relire de grands buffers sans y être invité.
+- Traiter le contenu des logs comme potentiellement sensible — ne pas répercuter dans le chat les lignes ressemblant à des tokens, corps de requêtes ou PII, sauf si l'utilisateur le demande explicitement.
+- Déléguer à [`/investigate`](/fr/reference/skills/investigate/) lorsque l'utilisateur veut le contexte de cause racine autour des logs, ou à [`/metrics`](/fr/reference/skills/metrics/) lorsqu'un pattern de log corrèle avec un pic de ressources.
+- Lorsque l'utilisateur signale qu'il a terminé, arrêter le tail et tuer la session tmux.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--attach`</dt>
+  <dd>Attacher l'agent à une session tmux kstack existante plutôt qu'en démarrer une nouvelle.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Démarrer une nouvelle session en mode détaché — aucune fenêtre de terminal n'est ouverte, connexion manuelle requise.</dd>
+</dl>
+
+Les flags globaux de [Overview](/fr/reference/skills/overview/) s'appliquent également.

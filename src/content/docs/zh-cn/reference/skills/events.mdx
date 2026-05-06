@@ -1,0 +1,99 @@
+---
+title: /events
+description: 最近的集群事件，按原因分组并按严重性排序，信号不会被 `Pulled`/`Created`/`Started` 噪声淹没。
+---
+
+`/events` 技能拉取最近的 Kubernetes 事件并将其折叠成简短的排名列表 — `Warning` 事件优先，其次是 `Normal` 中值得关注的事件。该技能只读，永远不会改变集群状态。
+
+输出刻意控制在较小范围，使首次响应的阅读成本和模型处理成本都很低。完整事件列表写入本地 JSON 缓存，代理在后续问题中直接从缓存读取，无需重复调用 API。
+
+```text
+/events                            # snapshot (uses cache if fresh)
+/events --refresh                  # force a fresh fetch
+/events --ttl 5m                   # only re-fetch if older than 5m
+```
+
+该技能不接受位置参数。后续问题（"只看 payments"、"pod/checkout-7c9 上的事件"、"显示被抑制的 Normal 事件"）从缓存中回答 — 参见下方[后续问题](#后续问题)。
+
+---
+
+## 检查内容
+
+:::note[检查]
+- 所有命名空间中的 `Warning` 事件，按 `(reason, involvedObject.kind, namespace)` 分组
+- 通常有意义的 `Normal` 事件 — `Killing`、`Preempting`、`NodeNotReady`、`Rebooted`、`FailedScheduling` 等 — 嘈杂事件（`Pulled`、`Created`、`Started`、`Scheduled`、`SuccessfulCreate`）折叠为单行尾注
+- 每个分组：计数、首次/最后时间戳、最近消息，以及涉及的对象（数量较多时截断显示）
+:::
+
+数据来源：仅 Kubernetes API — `kubectl get events --all-namespaces`（或 `events.k8s.io/v1` 的等价形式），服务端按 `lastTimestamp` 排序。
+
+---
+
+## 工作方式
+
+技能通过单次调用获取集群事件，并将完整列表以 `events.json` 写入每个上下文对应的缓存目录。聚合和严重性排序在客户端对 JSON 进行，因此在 TTL 时间窗口内重复运行可完全跳过 API。
+
+摘要格式如下：
+
+```text
+Events: prod-us-east · last 1h · 2 warning groups, 1 notable
+
+WARN  payments/Pod         BackOff             14×  2m ago   "Back-off restarting failed container server in pod checkout-7c9"
+WARN  ingress/Pod          FailedScheduling    1×   38m ago  "0/12 nodes are available: 3 node(s) had untolerated taint…"
+NOTE  kube-system/Node     NodeNotReady        1×   52m ago  "Node ip-10-0-3-14 status is now: NodeNotReady"
+
+…and 412 Normal events (Pulled, Created, Started, Scheduled) suppressed.
+
+Snapshot cached (TTL 5m). Ask to drill in — e.g. "only payments", "events on pod/checkout-7c9", "show suppressed".
+```
+
+查询窗口内无异常时，技能打印一行确认无内容可报并退出。
+
+---
+
+## 后续问题
+
+摘要刻意折叠了嘈杂的 `Normal` 原因并截断了逐对象详情，以保持首次响应的简洁。当你请求更多内容，或询问任何可从缓存事件列表回答的问题时，代理使用 `jq` 读取缓存，而非重新运行技能：
+
+```text
+❯ /events
+[ summary... ]
+
+❯ only payments
+[ events filtered to namespace payments, from events.json ]
+
+❯ show the suppressed Normal events
+[ full Normal-event list, from events.json ]
+
+❯ events on pod/checkout-7c9
+[ filtered by involvedObject, walking owners one level up, from events.json ]
+```
+
+对于缓存中没有的数据（日志、特定资源的 YAML、跨多个来源的根因分析），代理路由到对应技能 — [`/logs`](/zh-cn/reference/skills/logs/) 或 [`/investigate`](/zh-cn/reference/skills/investigate/) — 而非扩展 `/events` 的范围。
+
+说"刷新"/"重新获取"/"重新检查"，代理将使用 `--refresh` 重新调用技能。
+
+---
+
+## 代理收到的指引
+
+除获取事件列表外，技能还向代理说明如何处理后续问题：
+
+- 优先使用 `jq` 从缓存的 `events.json` 回答，而非重新调用技能。
+- 将嘈杂原因集（`Pulled`、`Created`、`Started`、`Scheduled`、`SuccessfulCreate`）视为可折叠内容 — 仅在用户请求被抑制的事件时展示。
+- 当用户询问"`pod/X` 上的事件"时，向上追溯一级 Owner（`Pod` → `ReplicaSet` → `Deployment`，`Pod` → `Job` → `CronJob`），避免遗漏针对控制器触发的事件。
+- `BackOff` 或 `CrashLoopBackOff` 后面的容器输出转交给 [`/logs`](/zh-cn/reference/skills/logs/)，当单个资源成为焦点时转交给 [`/investigate`](/zh-cn/reference/skills/investigate/)。
+
+---
+
+## 选项
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>绕过缓存，从 API 获取最新数据。</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>仅当缓存快照早于该值时才重新获取（kubectl 风格：<code>1m</code>、<code>5m</code>、<code>1h</code>）。默认值：<code>5m</code>。设置 <code>--refresh</code> 时忽略。</dd>
+</dl>
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

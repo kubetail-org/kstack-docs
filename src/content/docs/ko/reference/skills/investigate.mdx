@@ -1,0 +1,52 @@
+---
+title: /investigate
+description: '실패하거나 의심스러운 리소스에 대한 근본 원인 조사를 시작합니다 — 초기 번들을 수집하고 에이전트에게 브리핑합니다.'
+---
+
+`/investigate` 스킬은 진행 중인 문제를 분류하는 데 에이전트의 도움을 받는 방법입니다. 사용 시 스킬은 컨텍스트로 사용할 초기 데이터 번들(예: 사양, 현재 및 이전 컨테이너 상태, 문제가 있는 리소스의 이벤트)을 가져오고 사용 가능한 내용과 조사 접근 방법에 대해 에이전트에게 브리핑합니다.
+
+이후 자연어로 후속 질문을 하면 에이전트가 이미 가진 정보에서 답변할지, 새로운 내용을 가져올지, 아니면 다른 도구를 사용할지 결정합니다.
+
+```text
+/investigate                             # prompts for a target
+/investigate pod/checkout-7c9            # explicit kind/name
+/investigate the api deployment          # natural-language target
+/investigate why is checkout crashing    # natural-language + intent
+```
+
+자연어 대상 및 범위 지정(네임스페이스, 레이블 셀렉터, 워크로드 이름)이 지원됩니다([개요](/ko/reference/skills/overview/) 참조).
+
+---
+
+## 수집되는 내용
+
+:::note[초기 번들]
+- 문제가 있는 리소스의 사양 및 상태
+- 문제가 있는 리소스 및 소유자에 대한 이벤트 (`Pod`의 `ReplicaSet` 및 `Deployment`, `Job`의 `CronJob` 등)
+- 현재 컨테이너 및 이전 컨테이너(`--previous`)의 로그 — 실패를 포함할 가능성이 가장 높은 라인으로 생략
+- 명백한 관련 리소스: 지원 `Service`, 마운트된 `ConfigMap` 및 `Secret` (이름만, 내용 제외), 바인딩된 PVC, 참조된 `ServiceAccount`
+- 관련이 있을 때 문제가 있는 파드가 스케줄된 노드 — 상태, 용량, 압박 여부
+:::
+
+출처: Kubernetes API 전용.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+스킬은 에이전트에게 조사 접근 방법을 안내합니다:
+
+- 데이터 번들을 읽는 방법과 어떤 신호가 어디를 가리키는 경향이 있는지 (종료 코드, 이벤트 이유, 일반적인 상태 조합).
+- 현재 상태가 필요한 후속 작업은 (이미 오래되었을 수 있는) 번들에서 추론하기보다 재가져와야 합니다.
+- 지속적인 관찰이 필요한 상황에서는 범위가 지정된 이벤트 감시를 사용할 수 있습니다.
+- 인접 스킬로 전달 시기: 실시간 테일은 [`/logs`](/ko/reference/skills/logs/), 셸은 [`/exec`](/ko/reference/skills/exec/), 시간에 따른 리소스 사용량은 [`/metrics`](/ko/reference/skills/metrics/).
+
+해당 컨텍스트가 로드되면 나머지 세션은 일반적인 대화입니다 — 문제의 형태가 무엇이든 원하는 것을 물어보십시오.
+
+---
+
+## 옵션
+
+`/investigate`는 스킬별 플래그를 사용하지 않습니다. 프롬프트 또는 후속 질문에서 자연어로 로그, 기간, 리소스의 범위를 지정하십시오.
+
+[개요](/ko/reference/skills/overview/)의 글로벌 플래그가 적용됩니다.

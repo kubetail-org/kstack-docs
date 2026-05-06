@@ -1,0 +1,124 @@
+---
+title: 安装
+description: 安装、升级和卸载 kstack — 全局或在单个项目内，适用于 Claude Code 或任何支持的代理。
+---
+
+kstack 通过从 GitHub 拉取最新的已标记 Release 并将技能渲染到代理的技能目录中来安装。同一行引导命令同时支持 Claude Code 和 `PATH` 中所有其他受支持的代理。
+
+## 安装
+
+### 全局
+
+以"全局"模式安装 kstack，使技能在你机器上的任意项目中均可使用，运行：
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+这将 [kubetail-org/kstack](https://github.com/kubetail-org/kstack) 的最新已标记 Release 克隆到 `~/.config/kstack/upstream/`，并将每个技能渲染到 `PATH` 中检测到的每个代理 CLI 的技能目录。脚本完成后，打开任意代理会话，kstack 技能即可使用：
+
+```bash
+$ claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+默认情况下，`install` 脚本会在技能名称前添加 `kstack-*` 命名空间前缀。运行安装脚本时可使用 `--no-prefix` 标志禁用此行为（见下文）。
+
+### 本地
+
+以"本地"模式安装 kstack，使技能仅在代理从特定项目目录运行时可用，运行：
+
+```bash
+cd myproject
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+这将 [kubetail-org/kstack](https://github.com/kubetail-org/kstack) 的最新已标记 Release 克隆到 `<project>/.kstack/upstream/`，并将技能渲染到 `<project>/.<agent>/skills/`。脚本完成后，从该项目目录打开代理会话，kstack 技能即可使用：
+
+```bash
+$ cd myproject && claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+默认情况下，`install` 脚本会在技能名称前添加 `kstack-*` 命名空间前缀。运行安装脚本时可使用 `--no-prefix` 标志禁用此行为（见下文）。
+
+### 移除命名空间前缀
+
+若不希望安装带有 `kstack-*` 命名空间前缀的技能，可使用 `--no-prefix` 标志：
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --no-prefix
+```
+
+使用上述示例，`/kstack-cluster-status` 变为 `/cluster-status`，`/kstack-events` 变为 `/events`，以此类推。该选项同时适用于全局和本地安装。
+
+### 指定特定代理
+
+默认情况下，引导脚本安装到 `PATH` 中检测到的所有受支持代理。若要将安装限定到单个代理，传入 `--agent <name>`：
+
+| 代理 | 标志 | 全局安装路径 |
+|------------------|--------------------|---------------------------------|
+| Claude Code      | `--agent claude`   | `~/.claude/skills/`            |
+| OpenAI Codex CLI | `--agent codex`    | `~/.codex/skills/`             |
+| OpenCode         | `--agent opencode` | `~/.config/opencode/skills/`   |
+| Cursor           | `--agent cursor`   | `~/.cursor/skills/`            |
+| Factory Droid    | `--agent factory`  | `~/.factory/skills/`           |
+| Slate            | `--agent slate`    | `~/.slate/skills/`             |
+| Kiro             | `--agent kiro`     | `~/.kiro/skills/`              |
+| Hermes           | `--agent hermes`   | `~/.hermes/skills/`            |
+
+本地安装在项目目录下镜像此结构（如 `<project>/.codex/skills/`）。各代理的注意事项参见[在非 Claude 代理中使用 kstack](/zh-cn/guides/non-claude-agents/)。
+
+### 目录结构
+
+引导脚本创建以下目录结构：
+
+```
+<kstack-root>/
+├── upstream/        # pinned checkout of kubetail-org/kstack at the release tag
+├── bin/
+│   ├── upgrade      # helper used by "upgrade kstack"
+│   └── uninstall    # helper used below
+├── cache/           # per-context cache (query results, log buffers)
+└── state/           # per-context learned state (detected integrations, fingerprints)
+```
+
+此外还有每个检测到的代理对应的目录，如 `~/.claude/skills/cluster-status/`、`~/.claude/skills/events/` 等。
+
+## 升级
+
+运行 kstack 技能时，代理会悄悄检查是否有更新的 kstack Release 可用，若有则在响应顶部显示一行通知。直接说 **"upgrade kstack"**，代理会代为运行升级助手；说 **"dismiss"** 可隐藏通知直到下一个 Release。
+
+也可直接运行升级助手：
+
+```bash
+# Global install
+~/.config/kstack/bin/upgrade
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/upgrade
+```
+
+助手将最新标签拉取到现有的 upstream checkout 中并原地重新渲染技能。升级是幂等的，随时可安全运行 — `cache/` 和 `state/` 目录被保留，kstack 对集群的学习数据不会丢失。
+
+重新运行 curl 引导命令同样有效，结果相同；专用助手仅省去了解析安装位置的网络往返。
+
+## 卸载
+
+运行随安装捆绑的 `uninstall` 脚本：
+
+```bash
+# Global install
+~/.config/kstack/bin/uninstall
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/uninstall
+```
+
+助手在删除任何内容前会提示确认。它清除安装根目录（`~/.config/kstack` 或 `<project>/.kstack`），以及在所有已安装代理中占用的每个 kstack 技能槽。同一代理目录中的用户自定义技能保持不变 — 卸载程序仅删除它自己写入的槽位。
+
+卸载不会触及 kstack 可能在集群中创建的资源（调试容器、Pod 克隆、watcher Job）。若要移除这些资源，请在卸载**之前**运行 [`/cleanup`](/zh-cn/reference/skills/cleanup/)，趁技能仍然可用。

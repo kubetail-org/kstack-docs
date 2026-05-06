@@ -1,0 +1,63 @@
+---
+title: /audit-security
+description: Revisão de RBAC, postura de segurança de pod e recomendações de redução de privilégios.
+---
+
+O Skill `/audit-security` identifica identidades e workloads com privilégios excessivos: `ServiceAccounts` com mais acesso do que utilizam, pods rodando como root ou com escapes no nível do host, e bindings que concedem poder em todo o cluster onde um Role com escopo de namespace seria suficiente.
+
+Execute sem argumentos para uma varredura completa, ou nomeie um workflow para restringir o relatório.
+
+```text
+/audit-security                    # full sweep
+/audit-security rbac               # single workflow
+/audit-security pods in kube-system
+```
+
+Escopo em linguagem natural (namespaces, label selectors, nomes de workload) é suportado em todos os workflows (veja [Visão geral](/pt/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. RBAC
+
+:::note[Verificações]
+- ClusterRoles e Roles concedendo verbos ou recursos com wildcard (`*`)
+- Bindings para `cluster-admin` e outros Roles built-in de alto privilégio
+- `RoleBinding` e `ClusterRoleBinding` referenciando subjects que não existem mais
+:::
+
+Fontes: API do Kubernetes.
+
+### 2. Segurança de pod
+
+:::note[Verificações]
+- Containers rodando como root, sem `securityContext`, ou com `allowPrivilegeEscalation: true`
+- Pods com `privileged: true`, `hostNetwork`, `hostPID` ou `hostIPC`
+- Sistemas de arquivos raiz graváveis e Linux capabilities perigosas (`SYS_ADMIN`, `NET_ADMIN`, etc.)
+- `seccompProfile` ausente e workloads que falham nos perfis `baseline` ou `restricted` do Pod Security Standards
+:::
+
+Fontes: API do Kubernetes, avaliada contra os [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) upstream.
+
+### 3. Secrets e tokens de ServiceAccount
+
+:::note[Verificações]
+- Secrets órfãos sem nenhum consumidor
+- Pods com `automountServiceAccountToken` habilitado cujo SA não tem RoleBindings
+- Secrets legados de longa duração `kubernetes.io/service-account-token` ainda presentes no cluster
+:::
+
+Fontes: API do Kubernetes.
+
+---
+
+## O que o agent é instruído
+
+Além dos workflows, o Skill orienta o agent sobre como reportar:
+
+- Classificar findings por blast radius — wildcards com escopo de cluster acima dos com escopo de namespace, escapes de host acima de seccomp profiles ausentes.
+- Ser explícito que as verificações de RBAC são **estáticas**: elas encontram o que os `Roles` concedem, não o que os subjects realmente usam. Detectar permissões realmente não utilizadas requer análise de audit log, o que este Skill não faz.
+- Referenciar objetos `Secret` apenas por nome, namespace e tipo — nunca ler ou expor conteúdo.
+- Explicar em uma linha por que um finding importa (o que o privilégio permite) em vez de apenas nomear o verbo ou sinalizador ofensivo.
+- Encaminhar para [`/investigate`](/pt/reference/skills/investigate/) para um workload específico e para [`/audit-network`](/pt/reference/skills/audit-network/) para postura de mTLS e mesh, que é adjacente à segurança de pod.

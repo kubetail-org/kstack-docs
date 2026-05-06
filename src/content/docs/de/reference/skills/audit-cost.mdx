@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: Ressourcenverschwendung und Right-Sizing-Empfehlungen.
+---
+
+Der `/audit-cost`-Skill sucht nach überversorgten Workloads.
+
+Führe ihn ohne Argumente für einen vollständigen Sweep aus, oder benenne einen Workflow, um den Bericht einzugrenzen.
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+Natürlichsprachiges Scoping (Namespaces, Label-Selektoren, Workload-Namen) wird in jedem Workflow unterstützt (siehe [Übersicht](/de/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. CPU- und Speicher-Requests vs. tatsächliche Nutzung
+
+:::note[Checks]
+- Container, bei denen `resources.requests` deutlich höher ist als die beobachtete p95-Nutzung
+- Container ohne gesetztes `resources.requests`
+- Container, die ihr Speicherlimit erreichen (OOMKills im Fenster)
+:::
+
+Quellen: `metrics-server` für Live-Nutzung und Prometheus, falls erkannt, für historisches p95.
+
+### 2. Idle-Workloads
+
+:::note[Checks]
+- Deployments und StatefulSets mit null Traffic und nahezu null CPU über das Fenster
+- Jobs und CronJobs, die seit so langer Zeit fehlschlagen oder pausiert sind, dass sie offenbar vergessen wurden
+:::
+
+Quellen: `metrics-server` und die Kubernetes API für Job/CronJob-Status.
+
+### 3. Ungenutzter Speicher und Load Balancer
+
+:::note[Checks]
+- PersistentVolumes im Status `Released` und PVCs gebunden, aber nicht von einem Pod gemountet
+- `Service`-Objekte vom Typ `LoadBalancer` ohne Endpoints
+:::
+
+Quellen: Kubernetes API.
+
+---
+
+## Fenster
+
+Right-Sizing erfordert Verlaufsdaten. Standardmäßig blickt der Skill 7 Tage zurück, wenn Prometheus verfügbar ist, und greift auf den Live-Snapshot von `metrics-server` zurück, wenn nicht. Der Bericht gibt immer an, welche Quelle verwendet wurde und wie weit die Daten zurückreichen.
+
+---
+
+## Was dem Agent mitgeteilt wird
+
+Über die Workflows hinaus weist der Skill den Agent an, wie er berichten soll:
+
+- Die Quelle (`metrics-server` für Live, Prometheus für Verlauf) und den effektiven Betrachtungszeitraum im Header angeben — die Prometheus-Retention kann kürzer als die standardmäßigen 7 Tage sein.
+- Findings, die Prometheus erfordern, als „nicht verfügbar" markieren, wenn nur `metrics-server` vorhanden ist, anstatt sie still zu übergehen.
+- Nur Requests-vs.-Nutzungs-Lücken kennzeichnen, die groß genug sind, um in der Praxis von Bedeutung zu sein; kleine Deltas sind Rauschen.
+- An [`/metrics`](/de/reference/skills/metrics/) übergeben, wenn der Benutzer die zugrunde liegende Serie für eine bestimmte Workload sehen möchte.

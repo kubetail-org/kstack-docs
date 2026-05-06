@@ -1,0 +1,50 @@
+---
+title: /forget
+description: 清除 kstack 的本地缓存，丢弃其对集群的学习数据。
+---
+
+`/forget` 技能擦除你本机上 kstack 的本地状态。随着时间推移，kstack 会积累集群的工作记忆 — 最近的查询结果、检测到的集成、资源指纹，以及用于检测异常的基线。该技能强制清除这些数据，让代理从干净的状态重新开始。
+
+该技能不会触及集群中的任何内容。若要从集群本身移除 kstack 管理的资源，参见 [`/cleanup`](/zh-cn/reference/skills/cleanup/)。
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[仅由用户调用]
+`/forget` 附带 `disable-model-invocation: true`。代理永远不会自行擦除本地状态 — 仅在你显式输入 `/forget` 时运行，以防止意外丢失缓存上下文。
+:::
+
+---
+
+## 清除范围
+
+状态存储在 `~/.config/kstack/` 下，按 kubeconfig 上下文分区 — 遗忘 `staging` 永远不会影响 `prod`。
+
+:::note[本地状态]
+- **缓存**（`~/.config/kstack/cache/<context>/`）— 最近的查询结果、日志缓冲区、去重表、进行中的 watcher 状态。重建成本低，可随时清除。
+- **学习状态**（`~/.config/kstack/state/<context>/`）— 检测到的集成、资源指纹、基线、每个集群的偏好设置。下次使用时重建，但可能需要数次交互才能完全恢复。
+:::
+
+默认情况下，技能清除当前上下文的两者。
+
+---
+
+## 何时使用
+
+- 集群已重建或迁移，其旧标识与 kstack 记忆的内容不再匹配。
+- 你希望 kstack 从头重新学习 — 基线感觉陈旧，或早期会话教了它错误的内容。
+- 你准备把这台机器交接出去，不希望留下任何集群特定状态。
+
+---
+
+## 选项
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>清除所有上下文的缓存和学习状态，而非仅当前上下文</dd>
+</dl>
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

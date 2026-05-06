@@ -1,0 +1,114 @@
+---
+title: /exec
+description: AI 辅助的 shell，进入 Pod 容器、节点或临时调试容器 — 通过 tmux 与代理共享。
+---
+
+`/exec` 技能是 `kubectl exec` 的 AI 增强版本。用自然语言描述目标，代理自动选择合适的机制：对正在运行容器的普通 `exec`、目标容器无可用 shell 时的临时调试容器，或节点上的特权 shell。
+
+会话运行在 **tmux** 窗口内，你和代理同时附加其中。你可以输入命令，代理也可以输入，输出实时可见。
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+支持自然语言范围限定（命名空间、标签选择器、工作负载名称），参见[概述](/zh-cn/reference/skills/overview/)。
+
+:::note[仅由用户调用]
+`/exec` 附带 `disable-model-invocation: true`，代理永远不会自行启动 shell — 仅在你显式输入 `/exec` 时运行。鉴于下方介绍的特权模式，这是有意为之。
+:::
+
+:::caution[安全]
+`/exec` 打开一个交互式 shell，你和代理均可输入。节点和调试容器模式会创建具有宿主级访问权限的特权 Pod（`hostPID`、`hostNetwork`、宿主文件系统挂载于 `/host`）。窗格中可见的任何内容 — 包括你粘贴的密钥、环境变量和命令输出 — 都会被代理读取，并可能发送到模型。完整信任模型参见[安全](/zh-cn/concepts/security/)。
+:::
+
+---
+
+## 前置条件
+
+`tmux` 必须已安装并在 `$PATH` 中。缺少它技能将无法运行。
+
+---
+
+## 模式
+
+代理根据你的描述解析目标，并选择以下模式之一。
+
+### 1. Pod 容器（默认）
+
+适用于有可用 shell 的运行中 Pod。等价于 `kubectl exec -it <pod> -c <container> -- <shell>`，当 Pod 只有一个容器，或其中一个明显是主容器时，自动选取容器。
+
+:::note[行为]
+- 自动检测 shell（`bash`，其次 `sh`，其次 `ash`）
+- 容器从 Pod spec 推断，除非以 `<pod>/<container>` 形式指定
+- 若无可用 shell，自动回退到调试容器模式
+:::
+
+### 2. 调试容器
+
+当目标容器是 distroless、scratch 或其他无 shell 的镜像时自动触发，也可通过 `/exec debug <pod>` 显式触发。等价于 `kubectl debug -it <pod> --target=<container> --image=<toolbox>`，共享目标的进程命名空间，可通过 `/proc/<pid>/root` 检查其文件系统，并从同一网络命名空间检查其网络。
+
+:::note[行为]
+- 与目标容器共享进程命名空间
+- 目标文件系统可在 `/proc/1/root` 访问
+- 默认使用 `nicolaka/netshoot`（可通过 `--image` 替换）
+:::
+
+### 3. 节点
+
+节点上的特权 root shell，用于宿主级调试（kubelet 日志、`journalctl`、`crictl`、网络命名空间）。实现为一个调度到目标节点的短期特权 Pod，带有 `hostPID`、`hostNetwork`，宿主文件系统挂载于 `/host`。
+
+:::note[行为]
+- Pod 创建在 "default" 命名空间（除非另有指定）
+- 由用户指示代理时删除 Pod
+- 默认使用 `nicolaka/netshoot`
+:::
+
+---
+
+## 会话启动流程
+
+代理解析目标并启动底层 `exec` 或 `debug` 命令后，将：
+
+1. 以描述性名称（如 `kstack-exec-api-server`）启动一个分离的 tmux 会话。
+2. 尝试在桌面打开新终端窗口并附加到该会话 — shell 直接出现在你面前。
+3. 在聊天中打印完整的 `tmux attach` 命令，供你从任意终端手动连接（SSH、远程编辑器或窗口创建失败时均可使用）。
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+你和代理共享同一窗格，双方均可输入命令，均可看到完整输出。代理会保守地从窗格读取以节省 token，你可能需要主动提示代理跟进最新变化。告诉代理关闭会话，它将退出 shell、终止 tmux 会话，并删除其创建的 Pod。
+
+---
+
+## 代理收到的指引
+
+除启动会话外，技能还向代理说明如何在会话中行事：
+
+- 选择能回答问题的最低权限模式 — 优先普通 exec，其次调试容器，最后节点 shell。仅在当前模式无法看到用户所询问内容时才升级。
+- 保守地从 tmux 窗格读取以节省 token；提示用户向上滚动，而非自动重读大缓冲区。
+- 将窗格中可见的所有内容（环境变量、命令输出、粘贴文本）视为潜在敏感内容 — 除非用户要求，否则不回显到聊天中。
+- 当用户发出完成信号后，关闭会话：退出 shell，终止 tmux 会话，并删除技能创建的所有 Pod（调试容器、节点 shell Pod）。
+
+---
+
+## 选项
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>节点和调试容器模式使用的镜像（默认 <code>netshoot</code>）。</dd>
+
+  <dt>`--attach`</dt>
+  <dd>将代理附加到现有的 kstack tmux 会话，而非启动新会话。</dd>
+
+  <dt>`--detach`</dt>
+  <dd>以分离状态启动新会话 — 不打开终端窗口，需手动附加。</dd>
+</dl>
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

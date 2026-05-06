@@ -1,0 +1,74 @@
+---
+title: /logs
+description: 通过 Kubetail 的节点端 grep 获取和过滤容器日志 — 流式传输到与代理共享的 tmux 窗格。
+---
+
+`/logs` 技能是 AI 驱动的日志获取工具。你可以描述要查找的内容，代理会找到正确的 Pod、选择合适的时间窗口，并使用最优的 grep 过滤器仅获取关键日志行。
+
+为高效获取日志，该技能教会代理使用 [Kubetail](https://github.com/kubetail-org/kubetail)。Kubetail 在每个节点上运行 Rust 驱动的集群代理（传统意义上的 K8s 代理，而非 AI 代理），在远端执行过滤而非本地处理。这使得跨多个 Pod 和较长时间窗口的快速搜索成为可能，无需先传回大量数据。
+
+流运行在 **tmux** 窗口内，你和代理同时附加其中。代理读取窗格内容以回答你的问题，你可以滚动、搜索，或继续实时观察日志流。
+
+```text
+/logs                                     # prompts for a target
+/logs api                                 # recent logs from the api workload
+/logs errors from the last hour on api    # natural-language scoping
+/logs checkout for "timeout" in last 15m
+```
+
+支持自然语言范围限定（命名空间、标签选择器、工作负载名称、时间窗口、grep 模式），参见[概述](/zh-cn/reference/skills/overview/)。代理将你的描述转换为合适的 Kubetail 查询。
+
+:::caution[安全]
+容器日志经常包含敏感数据 — 密钥、token、请求体、PII。窗格中可见的任何内容都会被代理读取，并可能发送到模型。应将查询范围限定得尽量窄（指定工作负载、短时间窗口、有针对性的 grep），并优先在源头进行脱敏，而非依赖事后过滤。完整信任模型参见[安全](/zh-cn/concepts/security/)。
+:::
+
+---
+
+## 前置条件
+
+- `tmux` 必须在代理的 `$PATH` 中可用。缺少它技能将无法运行。
+- Kubetail 必须安装在集群中。若未安装，技能会主动提议使用 Kubetail 的 Helm Chart 为你安装（手动安装路径参见[安装指南](https://docs.kubetail.com/guides/cluster/installation)）。
+
+---
+
+## 代理如何启动日志会话
+
+代理解析目标并构建 Kubetail 查询后，将：
+
+1. 以描述性名称（如 `kstack-logs-api-server`）启动一个分离的 tmux 会话。
+2. 尝试在桌面打开新终端窗口并附加到该会话 — 日志流直接出现在你面前。
+3. 在聊天中打印完整的 `tmux attach` 命令，供你从任意终端手动连接（SSH、远程编辑器或窗口创建失败时均可使用）。
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-logs-api-server
+```
+
+你和代理共享同一窗格。代理会保守地从窗格读取以节省 token，你可能需要主动提示它跟进最新输出。告诉代理关闭会话，它将停止底层 tail 并终止 tmux 会话。
+
+---
+
+## 代理收到的指引
+
+除打开日志流外，技能还向代理说明如何行事：
+
+- 将用户描述转换为范围尽可能窄的 Kubetail 查询（指定工作负载、短时间窗口、目标 grep），并在流开始前显示已解析的查询，供用户进一步缩小范围。
+- 保守地从 tmux 窗格读取以节省 token；提示用户滚动，而非自动重读大缓冲区。
+- 将日志内容视为潜在敏感内容 — 除非用户明确要求，否则不将看起来像 token、请求体或 PII 的行回显到聊天中。
+- 当用户需要日志周围的根因上下文时，转交给 [`/investigate`](/zh-cn/reference/skills/investigate/)；当日志模式与资源峰值相关时，转交给 [`/metrics`](/zh-cn/reference/skills/metrics/)。
+- 当用户发出完成信号时，停止 tail 并终止 tmux 会话。
+
+---
+
+## 选项
+
+<dl>
+  <dt>`--attach`</dt>
+  <dd>将代理附加到现有的 kstack tmux 会话，而非启动新会话。</dd>
+
+  <dt>`--detach`</dt>
+  <dd>以分离状态启动新会话 — 不打开终端窗口，需手动附加。</dd>
+</dl>
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

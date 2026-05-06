@@ -1,0 +1,50 @@
+---
+title: /forget
+description: Clear kstack's local cache and discard what it learned about your cluster(s).
+---
+
+The `/forget` skill wipes kstack's local state on your machine. Over time kstack builds up a working memory of your clusters — recent query results, detected integrations, resource fingerprints, and baselines it uses to detect anomolies. This skill is a forced clearing of that data so the agent can start with a clean slate.
+
+This skill does not touch anything in the cluster. For removing kstack-managed resources from the cluster itself, see [`/cleanup`](/reference/skills/cleanup/).
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[User-invoked only]
+`/forget` ships with `disable-model-invocation: true`. The agent will never wipe local state on its own — it only runs when you explicitly type `/forget`, so you don't lose cached context unexpectedly.
+:::
+
+---
+
+## What it clears
+
+State lives under `~/.config/kstack/`, partitioned per kubeconfig context — forgetting `staging` never affects `prod`.
+
+:::note[Local state]
+- **Cache** (`~/.config/kstack/cache/<context>/`) — recent query results, log buffers, dedup tables, in-flight watcher state. Cheap to rebuild; cleared freely.
+- **Learned state** (`~/.config/kstack/state/<context>/`) — detected integrations, resource fingerprints, baselines, per-cluster preferences. Rebuilt on next use, but may take a few interactions to fully re-form.
+:::
+
+By default the skill clears both for the current context.
+
+---
+
+## When to run it
+
+- The cluster was rebuilt or migrated and its old identity no longer matches what kstack remembers.
+- You want kstack to re-learn from scratch — baselines feel stale, or an earlier session taught it something wrong.
+- You're handing the machine off and want no cluster-specific state left behind.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>Clear cache and learned state for every context, not just the current one</dd>
+</dl>
+
+Global flags from [Overview](/reference/skills/overview/) also apply.

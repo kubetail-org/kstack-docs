@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: '리소스 낭비 및 적정 규모 권장 사항.'
+---
+
+`/audit-cost` 스킬은 과잉 프로비저닝된 워크로드를 찾습니다.
+
+인수 없이 실행하면 전체 스윕을 수행하거나, 워크플로 이름을 지정하여 보고서 범위를 좁힐 수 있습니다.
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+모든 워크플로에서 자연어 범위 지정(네임스페이스, 레이블 셀렉터, 워크로드 이름)이 지원됩니다([개요](/ko/reference/skills/overview/) 참조).
+
+---
+
+## 워크플로
+
+### 1. CPU 및 메모리 요청 대비 실제 사용량
+
+:::note[검사 항목]
+- `resources.requests`가 관찰된 p95 사용량보다 현저히 높은 컨테이너
+- `resources.requests`가 전혀 설정되지 않은 컨테이너
+- 조회 기간 내 메모리 한도에 도달한 컨테이너 (OOMKill)
+:::
+
+출처: 실시간 사용량은 `metrics-server`, 감지된 경우 과거 p95는 Prometheus.
+
+### 2. 유휴 워크로드
+
+:::note[검사 항목]
+- 조회 기간 동안 트래픽이 0이고 CPU가 거의 0에 가까운 디플로이먼트 및 StatefulSet
+- 잊혀질 만큼 오랫동안 실패하거나 일시 중단된 Job 및 CronJob
+:::
+
+출처: `metrics-server` 및 Job/CronJob 상태를 위한 Kubernetes API.
+
+### 3. 미사용 스토리지 및 로드 밸런서
+
+:::note[검사 항목]
+- `Released` 상태의 PersistentVolume 및 어떤 파드에도 마운트되지 않은 PVC
+- 엔드포인트가 없는 `LoadBalancer` 타입 `Service` 오브젝트
+:::
+
+출처: Kubernetes API.
+
+---
+
+## 조회 기간
+
+적정 규모 조정에는 이력 데이터가 필요합니다. 기본적으로 Prometheus를 사용할 수 있을 때 7일을 조회하며, 그렇지 않을 경우 실시간 `metrics-server` 스냅샷으로 대체됩니다. 보고서에는 항상 사용된 출처와 데이터가 얼마나 거슬러 올라가는지 명시됩니다.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+워크플로 외에도 스킬은 에이전트에게 보고 방법을 안내합니다:
+
+- 헤더에 출처(실시간은 `metrics-server`, 이력은 Prometheus)와 유효 조회 기간을 명시합니다 — Prometheus 보존 기간이 기본 7일보다 짧을 수 있습니다.
+- `metrics-server`만 있을 때 Prometheus가 필요한 결과를 자동으로 생략하지 않고 "사용 불가"로 표시합니다.
+- 실제로 의미 있을 만큼 큰 요청 대비 사용량 차이만 표시합니다; 작은 델타는 노이즈입니다.
+- 사용자가 특정 워크로드의 기반 시리즈를 보려는 경우 [`/metrics`](/ko/reference/skills/metrics/)로 전달합니다.

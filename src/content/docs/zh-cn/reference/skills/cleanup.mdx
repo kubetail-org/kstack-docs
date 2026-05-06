@@ -1,0 +1,34 @@
+---
+title: /cleanup
+description: 从集群中移除所有 kstack 管理的资源。
+---
+
+`/cleanup` 技能移除 kstack 在集群中创建的所有资源。该技能是 [`/forget`](/zh-cn/reference/skills/forget/) 的对应技能 — `/forget` 清除本地状态，`/cleanup` 清除集群内资源。
+
+```text
+/cleanup                      # clean up the current context
+```
+
+:::note[仅由用户调用]
+`/cleanup` 附带 `disable-model-invocation: true`。代理永远不会自行启动清理 — 仅在你显式输入 `/cleanup` 时运行，因为该技能会删除集群资源。
+:::
+
+---
+
+## 清除范围
+
+kstack 在集群中创建的所有内容都标注了 `kstack.kubetail.com/owned-by=kstack` 注解。技能指示代理找到这些资源并将其删除。实际上，这涵盖了其他技能留下的资源 — 临时调试容器、特权节点 shell Pod、[`/exec`](/zh-cn/reference/skills/exec/) 创建的短期工具箱 Pod，以及为支撑它们而创建的临时 RBAC 或 ConfigMap。代理被指示保留所有未标注该注解的资源。
+
+---
+
+## 工作方式
+
+删除任何资源前，代理会列出找到的内容并请求你确认。资源按命名空间和 kind 分组，让你一目了然即将发生的变更。你可以批准全部资源，也可以用自然语言告诉代理跳过特定项目。
+
+如果删除失败 — 通常是 Finalizer 或权限问题 — 代理会报告哪些资源未能删除及原因，而非盲目重试。
+
+---
+
+## 选项
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

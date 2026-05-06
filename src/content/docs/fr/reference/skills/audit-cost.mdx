@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: Gaspillage de ressources et recommandations de dimensionnement optimal.
+---
+
+Le Skill `/audit-cost` recherche les workloads sur-provisionnés.
+
+Exécutez-la sans arguments pour un balayage complet, ou nommez un workflow pour affiner le rapport.
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+Le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads) est pris en charge sur chaque workflow (voir [Overview](/fr/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. Requêtes CPU et mémoire vs utilisation réelle
+
+:::note[Vérifications]
+- Conteneurs où `resources.requests` est nettement supérieur à l'utilisation p95 observée
+- Conteneurs sans aucun `resources.requests` défini
+- Conteneurs atteignant leur limite mémoire (OOMKills sur la fenêtre)
+:::
+
+Sources : `metrics-server` pour l'utilisation en direct, Prometheus lorsque détecté pour le p95 historique.
+
+### 2. Workloads inactifs
+
+:::note[Vérifications]
+- Deployments et StatefulSets avec zéro trafic et CPU quasi nul sur la fenêtre
+- Jobs et CronJobs en échec ou suspendus depuis suffisamment longtemps pour être considérés comme oubliés
+:::
+
+Sources : `metrics-server` et l'API Kubernetes pour le statut Job/CronJob.
+
+### 3. Stockage et load balancers inutilisés
+
+:::note[Vérifications]
+- PersistentVolumes en état `Released`, et PVCs liés mais non montés par aucun pod
+- Objets `Service` de type `LoadBalancer` sans endpoints
+:::
+
+Sources : API Kubernetes.
+
+---
+
+## Fenêtre
+
+Le dimensionnement optimal nécessite un historique. Par défaut, le Skill remonte 7 jours lorsque Prometheus est disponible, et se replie sur le snapshot en direct de `metrics-server` dans le cas contraire. Le rapport indique toujours la source utilisée et la profondeur des données disponibles.
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Au-delà des workflows eux-mêmes, le Skill instruit l'agent sur la manière de présenter les résultats :
+
+- Indiquer la source (`metrics-server` pour le direct, Prometheus pour l'historique) et la fenêtre d'historique effective dans l'en-tête — la rétention Prometheus peut être inférieure aux 7 jours par défaut.
+- Marquer les résultats nécessitant Prometheus comme « non disponible » lorsque seul `metrics-server` est présent, plutôt que de les supprimer silencieusement.
+- Ne signaler que les écarts requêtes/utilisation suffisamment importants pour avoir un impact réel — les petits deltas sont du bruit.
+- Déléguer à [`/metrics`](/fr/reference/skills/metrics/) lorsque l'utilisateur veut voir les séries sous-jacentes pour un workload spécifique.

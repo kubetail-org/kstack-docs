@@ -1,0 +1,81 @@
+---
+title: /audit-network
+description: 'NetworkPolicy、Service、Ingress、GatewayAPI、DNS、暗号化のサニティチェック。'
+---
+
+`/audit-network` スキルは、クラスターネットワークの壊れている部分または欠落している部分を検索します。どのリソースにも一致しない `NetworkPolicy` インスタンス、エンドポイントのない `Service` インスタンス、解決されない `Ingress` および `GatewayAPI` ルート、DNSの問題、メッシュが利用可能なのに平文で通信しているワークロードなどです。
+
+引数なしで実行するとフルスイープ、ワークフロー名を指定するとレポートのスコープを絞り込めます。
+
+```text
+/audit-network                         # full sweep
+/audit-network policies                # single workflow
+/audit-network ingress in prod
+```
+
+自然言語スコープ（Namespace、ラベルセレクター、ワークロード名）はすべてのワークフローでサポートされています（[概要](/ja/reference/skills/overview/)を参照）。
+
+---
+
+## ワークフロー
+
+### 1. NetworkPolicy
+
+:::note[チェック項目]
+- デフォルト拒否がなく、ゼロポリシーで保護されているPodのNamespace
+- `podSelector` またはピアセレクターがどのPodやNamespaceにも一致しないポリシー
+- ターゲットPodが公開していないポートまたはプロトコルを参照するルール
+:::
+
+ソース：Kubernetes API。
+
+### 2. Service
+
+:::note[チェック項目]
+- 準備完了エンドポイントがゼロのService
+- `selector` / Podラベルの不一致、および `port` / `targetPort` の不一致
+- StatefulSetをバックエンドとしていないヘッドレスService（`clusterIP: None`）
+:::
+
+ソース：Kubernetes API。
+
+### 3. Ingress と GatewayAPI
+
+:::note[チェック項目]
+- Ingressまたはゲートウェイルート間のホスト名衝突
+- 存在しないまたは期限切れのSecretを参照するTLSエントリ
+- 存在しないまたはエンドポイントがないServiceを指すバックエンド
+:::
+
+ソース：Kubernetes API（CRDがインストールされている場合の `gateway.networking.k8s.io` を含む）。
+
+### 4. DNS
+
+:::note[チェック項目]
+- CoreDNS Podのヘルス状態と最近の再起動
+- CoreDNSメトリクスにおけるNXDOMAINまたはSERVFAILレートの上昇
+- CoreDNS ConfigMap内の解決されないスタブドメインとフォワーダー
+:::
+
+ソース：CoreDNSの `Deployment`、その `ConfigMap`、および公開されている場合のPrometheusメトリクス。
+
+### 5. 暗号化とmTLS
+
+:::note[チェック項目]
+- メッシュのサイドカーまたはアンビエントカバレッジ外のワークロード
+- 許容（平文許可）mTLSモードのNamespaceまたはワークロード
+:::
+
+ソース：Istio、Linkerd、またはCilium CRD — これらのメッシュのいずれかが検出された場合にのみ実行されます。
+
+---
+
+## エージェントへの指示
+
+ワークフローに加えて、スキルはエージェントにスコープとレポートの方法を指示します。
+
+- 関連するCRDがインストールされていない限り、メッシュとGateway APIのワークフローをスキップします — 欠如は検出結果ではありません。
+- TLSチェックでは、誤った「期限切れ」を報告するのではなく、RBACのためにSecretの内容を読み取れない場合はその旨を記載します。
+- DNSアクティブプローブチェックでは、障害を解釈できるようにプローブソース（解決に使用されるクラスター内Pod）を明記します。
+- 検出結果をワークフローごとにグループ化し、判定だけでなく証拠（セレクター、エンドポイント、ConfigMapキー）を含めます。
+- CoreDNSログについては [`/logs`](/ja/reference/skills/logs/) に、単一のワークロードが根本原因の場合は [`/investigate`](/ja/reference/skills/investigate/) に渡します。

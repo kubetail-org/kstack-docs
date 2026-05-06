@@ -1,0 +1,63 @@
+---
+title: /audit-security
+description: RBAC 审查、Pod 安全态势和权限收紧建议。
+---
+
+`/audit-security` 技能用于检测特权过高的身份和工作负载：拥有超出实际使用权限的 `ServiceAccount`、以 root 运行或存在宿主级逃逸的 Pod，以及在命名空间范围角色足以满足需求时却授予集群级权限的绑定。
+
+不带参数运行可进行全面扫描，也可指定工作流名称以限定报告范围。
+
+```text
+/audit-security                    # full sweep
+/audit-security rbac               # single workflow
+/audit-security pods in kube-system
+```
+
+每个工作流均支持自然语言范围限定（命名空间、标签选择器、工作负载名称），参见[概述](/zh-cn/reference/skills/overview/)。
+
+---
+
+## 工作流
+
+### 1. RBAC
+
+:::note[检查]
+- 授予通配符动词或资源（`*`）的 ClusterRole 和 Role
+- 绑定到 `cluster-admin` 及其他高权限内置角色的绑定
+- 引用已不存在主体的 `RoleBinding` 和 `ClusterRoleBinding`
+:::
+
+数据来源：Kubernetes API。
+
+### 2. Pod 安全性
+
+:::note[检查]
+- 以 root 运行、无 `securityContext` 或设置了 `allowPrivilegeEscalation: true` 的容器
+- 设置了 `privileged: true`、`hostNetwork`、`hostPID` 或 `hostIPC` 的 Pod
+- 可写根文件系统及危险 Linux Capability（`SYS_ADMIN`、`NET_ADMIN` 等）
+- 缺少 `seccompProfile`，以及未通过 Pod Security Standards `baseline` 或 `restricted` 配置的工作负载
+:::
+
+数据来源：Kubernetes API，依据上游 [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) 进行评估。
+
+### 3. Secret 和 ServiceAccount Token
+
+:::note[检查]
+- 无消费者的孤立 Secret
+- 启用了 `automountServiceAccountToken` 但其 ServiceAccount 无任何 RoleBinding 的 Pod
+- 集群上仍存在的长期有效旧式 `kubernetes.io/service-account-token` Secret
+:::
+
+数据来源：Kubernetes API。
+
+---
+
+## 代理收到的指引
+
+除工作流外，技能还向代理说明如何报告：
+
+- 按爆炸半径排序发现 — 集群级通配符高于命名空间级，宿主逃逸高于缺少 seccomp Profile。
+- 明确说明 RBAC 检查是**静态的**：它们找到 `Role` 授予的权限，而非主体实际使用的权限。检测真正未使用的权限需要审计日志分析，该技能不具备此能力。
+- 仅通过名称、命名空间和类型引用 `Secret` 对象 — 绝不读取或展示内容。
+- 用一行说明发现为何重要（该权限能实现什么），而不仅仅指出有问题的动词或标志。
+- 针对特定工作负载转交给 [`/investigate`](/zh-cn/reference/skills/investigate/)，mTLS 和 Service Mesh 态势转交给 [`/audit-network`](/zh-cn/reference/skills/audit-network/)（与 Pod 安全性相邻）。

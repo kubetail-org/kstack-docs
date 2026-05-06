@@ -1,0 +1,44 @@
+---
+title: 概述
+description: 所有 kstack 技能的共用约定 — 自然语言参数和全局标志。
+---
+
+本页描述所有技能中通用的约定。
+
+## 自然语言参数
+
+除非技能页面另有说明，你在技能名称后输入的任何内容都会作为自由格式指令传递给代理。无需记忆语法，直接描述你想要的结果即可。
+
+```text
+> /cluster-status only pods
+> /investigate backend server keeps crashing
+> /logs errors from the last hour on api pods
+> /audit-outdated container images in kube-system
+```
+
+代理会解析意图，选取合适的资源，并相应地缩小范围。如需精确控制，标志（见下文）仍然有效 — 可自由混用。
+
+## K8s 上下文
+
+默认情况下，技能使用你的 `kubeconfig` 默认上下文，除非你另有指定。你可以用自然语言切换上下文，kstack 将在当前会话的其余部分记住你的选择：
+
+```text
+> /cluster-status
+[ ... ]
+> redo with prod
+[ ... ]
+```
+
+## 全局标志
+
+每个技能均支持以下标志：
+
+<dl>
+  <dt>`--context <ctx>`</dt>
+  <dd>覆盖当前 kubeconfig 上下文</dd>
+
+  <dt>`--help`</dt>
+  <dd>在浏览器中打开该技能的参考文档页面</dd>
+</dl>
+
+更多全局标志将陆续添加。当单个技能页面列出其专属标志时，全局标志同样适用。

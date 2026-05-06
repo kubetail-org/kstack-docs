@@ -1,0 +1,52 @@
+---
+title: /investigate
+description: 对故障或可疑资源启动根因分析 — 收集初始数据包并向代理简报情况。
+---
+
+`/investigate` 技能是你引入代理协助处理持续问题的入口。使用时，技能拉取一个初始数据包作为上下文（如 spec、当前及上一个容器状态、问题资源上的事件），并向代理简报可用内容及建议的调查思路。
+
+此后，你可以用自然语言提出后续问题，代理决定是从已有数据回答、获取新数据，还是调用其他工具。
+
+```text
+/investigate                             # prompts for a target
+/investigate pod/checkout-7c9            # explicit kind/name
+/investigate the api deployment          # natural-language target
+/investigate why is checkout crashing    # natural-language + intent
+```
+
+支持自然语言目标和范围限定（命名空间、标签选择器、工作负载名称），参见[概述](/zh-cn/reference/skills/overview/)。
+
+---
+
+## 收集内容
+
+:::note[初始数据包]
+- 问题资源的 spec 和 status
+- 问题资源及其 Owner 上的事件（`Pod` 的 `ReplicaSet` 和 `Deployment`、`Job` 的 `CronJob` 等）
+- 当前容器及上一个容器（`--previous`，若存在）的日志 — 截断到最可能包含故障信息的行
+- 明显的相关资源：关联 `Service`、挂载的 `ConfigMap` 和 `Secret`（仅名称，不含内容）、绑定的 PVC、引用的 `ServiceAccount`
+- 问题 Pod 所在节点（相关时）— 状态、容量，以及是否存在压力
+:::
+
+数据来源：仅 Kubernetes API。
+
+---
+
+## 代理收到的指引
+
+技能向代理说明如何最有效地开展调查：
+
+- 如何解读数据包，以及哪些信号通常指向何处（退出码、事件原因、常见状态组合）。
+- 需要当前状态的后续问题应重新获取数据，而非基于（可能已过时的）数据包推理。
+- 当情况需要持续观察时，可使用范围事件监视。
+- 何时转交给相邻技能：实时跟随日志转交给 [`/logs`](/zh-cn/reference/skills/logs/)，需要 shell 时转交给 [`/exec`](/zh-cn/reference/skills/exec/)，查看一段时间内资源使用量时转交给 [`/metrics`](/zh-cn/reference/skills/metrics/)。
+
+加载该上下文后，会话的其余部分就是普通对话 — 无论问题以何种形式出现，直接问即可。
+
+---
+
+## 选项
+
+`/investigate` 不接受技能专属标志。在提示或后续问题中用自然语言指定日志、时间窗口或资源范围。
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

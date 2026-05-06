@@ -1,0 +1,74 @@
+---
+title: /logs
+description: Busca e filtra logs de container via grep no lado do node do Kubetail — transmitido para um painel tmux compartilhado com o agent.
+---
+
+O Skill `/logs` é um buscador de logs com tecnologia de IA. Você pode usar o Skill para descrever o que está procurando e o agent encontrará os pods certos, escolherá a janela de tempo apropriada e usará o melhor filtro grep para buscar apenas as linhas que importam.
+
+Para buscar logs com eficiência, este Skill ensina o agent a usar [Kubetail](https://github.com/kubetail-org/kubetail), que usa um cluster agent baseado em Rust (um agent K8s clássico, não um agent de IA) rodando em cada node para realizar a filtragem remotamente em vez de localmente. Isso torna prático pesquisar em muitos pods e janelas de tempo longas rapidamente, sem precisar enviar gigabytes de dados primeiro.
+
+O stream é executado dentro de uma janela **tmux** à qual você e o agent estão conectados simultaneamente. O agent lê do painel para responder à sua pergunta e você pode rolar, pesquisar ou continuar assistindo o tail ao vivo em tempo real.
+
+```text
+/logs                                     # prompts for a target
+/logs api                                 # recent logs from the api workload
+/logs errors from the last hour on api    # natural-language scoping
+/logs checkout for "timeout" in last 15m
+```
+
+Escopo em linguagem natural (namespaces, label selectors, nomes de workload, janelas de tempo, padrões grep) é suportado (veja [Visão geral](/pt/reference/skills/overview/)). O agent traduz sua descrição na consulta Kubetail apropriada.
+
+:::caution[Segurança]
+Logs de container frequentemente contêm dados sensíveis — secrets, tokens, corpos de requisição, PII. Qualquer coisa visível no painel é lida pelo agent e pode ser enviada ao modelo. Restrinja consultas ao máximo (workload específico, janela de tempo curta, grep direcionado) e prefira redação na origem em vez de confiar na filtragem após o fato. Veja [Segurança](/pt/concepts/security/) para o modelo de confiança completo.
+:::
+
+---
+
+## Requisitos
+
+- `tmux` deve estar disponível no `$PATH` do agent. O Skill não executará sem ele.
+- Kubetail deve estar instalado no cluster. Se não estiver, o Skill se oferecerá para instalá-lo usando o Helm chart do Kubetail (veja o [guia de instalação](https://docs.kubetail.com/guides/cluster/installation) para o caminho manual).
+
+---
+
+## Como o agent abre uma sessão de logs
+
+Assim que o agent resolve o alvo e constrói a consulta Kubetail, ele:
+
+1. Inicia uma sessão tmux desanexada com um nome descritivo (ex.: `kstack-logs-api-server`).
+2. Tenta abrir uma nova janela de terminal no seu desktop e conectá-la a essa sessão — para que o stream apareça na sua frente.
+3. Imprime o comando `tmux attach` exato no chat, para que você possa se conectar manualmente a partir de qualquer terminal (útil por SSH, em um editor remoto, ou se a abertura da janela falhar).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-logs-api-server
+```
+
+Você e o agent compartilham o mesmo painel. O agent lê a janela de forma conservadora para economizar tokens, então você pode precisar incitá-lo a se atualizar sobre a saída mais recente. Diga ao agent para encerrar a sessão e ele parará o tail subjacente e matará a sessão tmux.
+
+---
+
+## O que o agent é instruído
+
+Além de abrir o stream, o Skill orienta o agent sobre como se comportar:
+
+- Traduzir a descrição do usuário na consulta Kubetail mais restrita viável — workload específico, janela de tempo curta, grep direcionado — e mostrar a consulta resolvida para que o usuário possa restringir mais antes do início do stream.
+- Ler do painel tmux de forma conservadora para economizar tokens; incitar o usuário a rolar em vez de re-ler buffers grandes sem ser solicitado.
+- Tratar o conteúdo dos logs como potencialmente sensível — não repetir no chat linhas que pareçam tokens, corpos de requisição ou PII a menos que o usuário peça explicitamente.
+- Encaminhar para [`/investigate`](/pt/reference/skills/investigate/) quando o usuário quiser contexto de causa raiz ao redor dos logs, ou para [`/metrics`](/pt/reference/skills/metrics/) quando um padrão de log se correlaciona com um pico de recursos.
+- Quando o usuário sinalizar que terminou, parar o tail e matar a sessão tmux.
+
+---
+
+## Opções
+
+<dl>
+  <dt>`--attach`</dt>
+  <dd>Conectar o agent a uma sessão tmux kstack existente em vez de iniciar uma nova.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Iniciar uma nova sessão no estado desanexado — nenhuma janela de terminal é aberta, conecte manualmente.</dd>
+</dl>
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) também se aplicam.

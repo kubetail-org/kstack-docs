@@ -1,0 +1,114 @@
+---
+title: /exec
+description: KI-gesteuerte Shell in einen Pod-Container, Node oder ephemeren Debug-Container — gemeinsam mit dem Agent über tmux genutzt.
+---
+
+Der `/exec`-Skill ist eine KI-gestützte Version von `kubectl exec`. Beschreibe das Ziel in natürlicher Sprache, und der Agent wählt den richtigen Mechanismus: ein normales `exec` in einen laufenden Container, einen ephemeren Debug-Container wenn das Ziel keine eigene brauchbare Shell hat, oder eine privilegierte Shell auf einem Node.
+
+Die Session läuft in einem **tmux**-Fenster, mit dem du und der Agent gleichzeitig verbunden seid. Du kannst tippen, der Agent kann tippen, und du siehst die Ausgabe in Echtzeit.
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+Natürlichsprachiges Scoping (Namespaces, Label-Selektoren, Workload-Namen) wird unterstützt (siehe [Übersicht](/de/reference/skills/overview/)).
+
+:::note[Nur vom Benutzer ausgeführt]
+`/exec` wird mit `disable-model-invocation: true` ausgeliefert, sodass der Agent niemals eigenständig eine Shell startet — er wird nur ausgeführt, wenn du explizit `/exec` eingibst. Das ist angesichts der privilegierten Modi unten beabsichtigt.
+:::
+
+:::caution[Sicherheit]
+`/exec` öffnet eine interaktive Shell, in die sowohl du als auch der Agent eingeben können. Node- und Debug-Container-Modi erstellen privilegierte Pods mit Host-Level-Zugriff (`hostPID`, `hostNetwork`, Host-Dateisystem unter `/host` eingehängt). Alles, was in der Pane sichtbar ist — einschließlich eingefügter Secrets, Umgebungsvariablen und Befehlsausgaben — wird vom Agent gelesen und möglicherweise an das Modell gesendet. Siehe [Sicherheit](/de/concepts/security/) für das vollständige Vertrauensmodell.
+:::
+
+---
+
+## Anforderungen
+
+`tmux` muss installiert und im `$PATH` verfügbar sein. Ohne `tmux` läuft der Skill nicht.
+
+---
+
+## Modi
+
+Der Agent löst das Ziel aus deiner Beschreibung auf und wählt einen der folgenden.
+
+### 1. Pod-Container (Standard)
+
+Der Standard für einen laufenden Pod mit einer brauchbaren Shell. Entspricht `kubectl exec -it <pod> -c <container> -- <shell>`, wobei der Container automatisch gewählt wird, wenn der Pod nur einen hat oder einer offensichtlich der primäre ist.
+
+:::note[Verhalten]
+- Shell wird automatisch erkannt (`bash`, dann `sh`, dann `ash`)
+- Container wird aus der Pod-Spec abgeleitet, wenn nicht als `<pod>/<container>` angegeben
+- Fällt automatisch in den Debug-Container-Modus zurück, wenn keine Shell verfügbar ist
+:::
+
+### 2. Debug-Container
+
+Wird automatisch ausgelöst, wenn der Ziel-Container distroless, scratch oder sonst ohne Shell ist — oder explizit über `/exec debug <pod>`. Entspricht `kubectl debug -it <pod> --target=<container> --image=<toolbox>`, teilt den Prozess-Namespace des Ziels, sodass du sein Dateisystem über `/proc/<pid>/root` und sein Netzwerk aus demselben Netns prüfen kannst.
+
+:::note[Verhalten]
+- Teilt den Prozess-Namespace mit dem Ziel-Container
+- Das Dateisystem des Ziels ist unter `/proc/1/root` sichtbar
+- Verwendet standardmäßig `nicolaka/netshoot` (mit `--image` austauschbar)
+:::
+
+### 3. Node
+
+Eine privilegierte Root-Shell auf einem Node zum Host-Level-Debugging (Kubelet-Logs, `journalctl`, `crictl`, Netzwerk-Namespaces). Implementiert als kurzlebiger privilegierter Pod, der auf dem Ziel-Node mit `hostPID`, `hostNetwork` und dem Host-Dateisystem unter `/host` eingeplant wird.
+
+:::note[Verhalten]
+- Pod wird im „default"-Namespace erstellt (sofern nicht anders angegeben)
+- Pod wird gelöscht, wenn der Benutzer den Agent dazu anweist
+- Verwendet standardmäßig `nicolaka/netshoot`
+:::
+
+---
+
+## Wie die Session geöffnet wird
+
+Sobald der Agent das Ziel aufgelöst und den zugrundeliegenden `exec`- oder `debug`-Befehl gestartet hat:
+
+1. Startet eine detachierte tmux-Session mit einem beschreibenden Namen (z. B. `kstack-exec-api-server`).
+2. Versucht, ein neues Terminalfenster auf deinem Desktop zu öffnen und es mit dieser Session zu verbinden — sodass die Shell direkt vor dir erscheint.
+3. Gibt den genauen `tmux attach`-Befehl im Chat aus, sodass du manuell von jedem Terminal aus verbinden kannst (nützlich über SSH, in einem Remote-Editor oder wenn das Fenster-Spawn fehlschlägt).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+Du und der Agent teilt euch dieselbe Pane. Beide könnt Befehle eingeben; beide seht ihr die vollständige Ausgabe. Um Tokens zu sparen, liest der Agent konservativ aus dem Fenster, sodass du ihn möglicherweise anstoßen musst, um mit den neuesten Änderungen Schritt zu halten. Weise den Agent an, die Session zu beenden, und er löscht den von ihm erstellten Pod.
+
+---
+
+## Was dem Agent mitgeteilt wird
+
+Über den Session-Start hinaus weist der Skill den Agent an, wie er sich darin verhalten soll:
+
+- Den am wenigsten privilegierten Modus wählen, der die Frage beantworten kann — normales exec vor Debug-Container, Debug-Container vor Node-Shell. Nur eskalieren, wenn der aktuelle Modus nicht sehen kann, was der Benutzer fragt.
+- Konservativ aus der tmux-Pane lesen, um Tokens zu sparen; den Benutzer zum Zurückscrollen auffordern anstatt einen großen Buffer unaufgefordert erneut zu lesen.
+- Alles, was in der Pane sichtbar ist (Umgebungsvariablen, Befehlsausgaben, eingefügter Text), als potenziell sensibel behandeln — nicht zurück in den Chat geben, es sei denn, der Benutzer fragt.
+- Wenn der Benutzer signalisiert, dass er fertig ist, die Session beenden: Shell verlassen, tmux-Session beenden und alle vom Skill erstellten Pods löschen (Debug-Container, Node-Shell-Pods).
+
+---
+
+## Optionen
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>Image für Node- und Debug-Container-Modi (Standard <code>netshoot</code>).</dd>
+
+  <dt>`--attach`</dt>
+  <dd>Den Agent mit einer bestehenden kstack-tmux-Session verbinden anstatt eine neue zu starten.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Eine neue Session im detachierten Zustand starten — kein Terminalfenster wird geöffnet, manuell verbinden.</dd>
+</dl>
+
+Globale Flags aus [Übersicht](/de/reference/skills/overview/) gelten ebenfalls.

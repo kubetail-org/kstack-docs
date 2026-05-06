@@ -1,0 +1,42 @@
+---
+title: Introducción
+description: Kstack es un pack de Skills para Claude Code que le ayuda a realizar tareas de monitoreo, solución de problemas y auditoría en sus clusters K8s de forma inteligente y eficiente.
+---
+
+Kstack es un pack de Skills para Claude Code que le ayuda a realizar tareas de monitoreo, solución de problemas y auditoría en sus clusters K8s de forma inteligente y eficiente. Sin kstack, un agente que interactúa con un cluster suele llamar a `kubectl` directamente. Esto tiene algunas desventajas:
+
+- Las consultas amplias (`kubectl get pods -A -o yaml`) arrastran grandes bloques de YAML al contexto del agente. Esto consume tokens y coloca cadenas influenciadas por atacantes (anotaciones, mensajes de eventos, líneas de log) en el mismo contexto que las instrucciones.
+- Los agentes no son deterministas, por lo que la forma de la respuesta a _"¿está mi cluster saludable?"_ varía entre ejecuciones.
+- El prompt de permisos del agente host es a nivel de shell. Puede preguntar antes de ejecutar un comando, pero no distingue `kubectl get pods` de `kubectl delete namespace`.
+
+Kstack reemplaza el uso directo de `kubectl` para estas tareas con un conjunto fijo de Skills. Los Skills ejecutan scripts para recopilar datos en cada tarea y almacenan en caché los resultados completos en disco, devolviendo resúmenes al agente. Esto le da al agente un control más granular sobre la respuesta, lo que es más seguro, más eficiente en tokens, y también permite al agente responder preguntas de seguimiento con mayor rapidez.
+
+---
+
+## Habilidades
+
+**Monitoreo**
+* [`/cluster-status`](/es/reference/skills/cluster-status) — Instantánea de salud (reinicios de Pod, condiciones de node, presión de recursos)
+* [`/events`](/es/reference/skills/events) — Eventos recientes, ordenados por severidad
+
+**Solución de problemas**
+* [`/investigate <resource>`](/es/reference/skills/investigate) — Análisis de causa raíz a través de eventos, logs y recursos relacionados
+* [`/logs`](/es/reference/skills/logs) — Sesión tmux compartida que traduce lenguaje natural en obtención y análisis de logs (vía [Kubetail](https://github.com/kubetail-org/kubetail))
+* [`/metrics`](/es/reference/skills/metrics) — Obtiene métricas de CPU, memoria y otros recursos para pods, nodes y workloads
+* [`/exec <pod>`](/es/reference/skills/exec) — Shell tmux compartido en un pod, node o contenedor de depuración efímero
+
+**Auditorías**
+* [`/audit-security`](/es/reference/skills/audit-security) — RBAC, postura de seguridad de pods, ajuste de privilegios
+* [`/audit-network`](/es/reference/skills/audit-network) — Verificaciones de NetworkPolicy, Service, Ingress, GatewayAPI, DNS y cifrado
+* [`/audit-cost`](/es/reference/skills/audit-cost) — Solicitudes vs. uso real, sobreaprovisionamiento, capacidad inactiva
+* [`/audit-outdated`](/es/reference/skills/audit-outdated) — Servicios desactualizados, CVEs conocidos, actualizaciones de versión disponibles
+
+**Varios**
+* [`/cleanup`](/es/reference/skills/cleanup) — Elimina todos los recursos gestionados por kstack del cluster (contenedores de depuración, clones de pods, watcher jobs)
+* [`/forget`](/es/reference/skills/forget) — Borra el caché local de kstack y descarta lo que aprendió sobre su(s) cluster(s)
+
+---
+
+## Agentes compatibles
+
+Los Skills son archivos Markdown planos con scripts de shell asociados. El script de instalación ([https://kstack.sh/install](https://kstack.sh/install)) detecta cada agente compatible en su `PATH` y realiza la instalación en ellos: Claude Code, OpenAI Codex CLI, OpenCode, Cursor, Factory Droid, Slate, Kiro, Hermes. El comportamiento es idéntico entre agentes; solo difiere la ruta de instalación.

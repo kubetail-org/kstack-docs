@@ -1,0 +1,124 @@
+---
+title: Instalação
+description: Instale, atualize e desinstale o kstack — globalmente ou dentro de um único projeto, para Claude Code ou qualquer agent compatível.
+---
+
+O kstack é instalado baixando o release marcado mais recente do GitHub e renderizando Skills no diretório de Skills do seu agent. O mesmo bootstrap de uma linha cuida do Claude Code e de todos os outros agents compatíveis no seu `PATH`.
+
+## Instalar
+
+### Global
+
+Para instalar o kstack no modo global para que os Skills fiquem disponíveis em qualquer projeto na sua máquina, execute:
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+Isso baixa o release marcado mais recente de [kubetail-org/kstack](https://github.com/kubetail-org/kstack) em `~/.config/kstack/upstream/` e renderiza cada Skill no diretório de Skills de cada CLI de agent encontrado no seu `PATH`. Após o script concluir, abra qualquer sessão de agent e os Skills do kstack estarão disponíveis:
+
+```bash
+$ claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+Por padrão, o script `install` adiciona o prefixo de namespace `kstack-*` aos nomes dos Skills. Isso pode ser desativado usando o sinalizador `--no-prefix` ao executar o script de instalação (veja abaixo).
+
+### Local
+
+Para instalar o kstack no modo local para que os Skills fiquem disponíveis apenas quando o agent for executado a partir de um único diretório de projeto, execute:
+
+```bash
+cd myproject
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+Isso baixa o release marcado mais recente de [kubetail-org/kstack](https://github.com/kubetail-org/kstack) em `<project>/.kstack/upstream/` e renderiza os Skills em `<project>/.<agent>/skills/`. Após o script concluir, abra uma sessão de agent nesse diretório de projeto e os Skills do kstack estarão disponíveis:
+
+```bash
+$ cd myproject && claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+Por padrão, o script `install` adiciona o prefixo de namespace `kstack-*` aos nomes dos Skills. Isso pode ser desativado usando o sinalizador `--no-prefix` ao executar o script de instalação (veja abaixo).
+
+### Removendo o prefixo de namespace
+
+Se preferir instalar os Skills sem o prefixo de namespace `kstack-*`, use o sinalizador `--no-prefix`:
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --no-prefix
+```
+
+Com o exemplo acima, `/kstack-cluster-status` vira `/cluster-status`, `/kstack-events` vira `/events`, e assim por diante. A opção funciona tanto para instalações globais quanto locais.
+
+### Direcionando um agent específico
+
+Por padrão, o bootstrap instala em todos os agents compatíveis detectados no seu `PATH`. Para limitar a instalação a um agent, passe `--agent <name>`:
+
+| Agent            | Sinalizador        | Caminho de instalação global   |
+|------------------|--------------------|--------------------------------|
+| Claude Code      | `--agent claude`   | `~/.claude/skills/`            |
+| OpenAI Codex CLI | `--agent codex`    | `~/.codex/skills/`             |
+| OpenCode         | `--agent opencode` | `~/.config/opencode/skills/`   |
+| Cursor           | `--agent cursor`   | `~/.cursor/skills/`            |
+| Factory Droid    | `--agent factory`  | `~/.factory/skills/`           |
+| Slate            | `--agent slate`    | `~/.slate/skills/`             |
+| Kiro             | `--agent kiro`     | `~/.kiro/skills/`              |
+| Hermes           | `--agent hermes`   | `~/.hermes/skills/`            |
+
+Instalações locais espelham essa estrutura no diretório do projeto (ex.: `<project>/.codex/skills/`). Veja [Usando kstack com agents que não são Claude](/pt/guides/non-claude-agents/) para notas por agent.
+
+### Estrutura de diretórios
+
+O script bootstrap cria a seguinte estrutura de diretórios:
+
+```
+<kstack-root>/
+├── upstream/        # pinned checkout of kubetail-org/kstack at the release tag
+├── bin/
+│   ├── upgrade      # helper used by "upgrade kstack"
+│   └── uninstall    # helper used below
+├── cache/           # per-context cache (query results, log buffers)
+└── state/           # per-context learned state (detected integrations, fingerprints)
+```
+
+Mais um diretório por agent detectado, ex.: `~/.claude/skills/cluster-status/`, `~/.claude/skills/events/`, e assim por diante.
+
+## Atualizar
+
+Quando você executa um Skill do kstack, o agent verifica silenciosamente se uma versão mais recente está disponível e exibe um aviso de uma linha no topo da resposta quando encontra uma. Basta dizer **"upgrade kstack"** e o agent executará o helper de atualização; diga **"dismiss"** para ocultar o aviso até o próximo release.
+
+Você também pode executar o helper diretamente:
+
+```bash
+# Global install
+~/.config/kstack/bin/upgrade
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/upgrade
+```
+
+O helper obtém a tag mais recente no checkout upstream existente e re-renderiza os Skills no lugar. Atualizações são idempotentes e seguras de executar a qualquer momento — seus diretórios `cache/` e `state/` são preservados, então o kstack mantém o que já aprendeu sobre seus clusters.
+
+Re-executar o bootstrap curl também funciona e produz o mesmo resultado; o helper dedicado apenas evita a ida à rede para resolver onde instalar.
+
+## Desinstalar
+
+Para desinstalar, execute o script `uninstall` que acompanha sua instalação:
+
+```bash
+# Global install
+~/.config/kstack/bin/uninstall
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/uninstall
+```
+
+O helper pede confirmação antes de remover qualquer coisa. Ele limpa a raiz da instalação (`~/.config/kstack` ou `<project>/.kstack`) e todos os slots de Skill de propriedade do kstack em todos os agents nos quais instalou. Skills criados pelo usuário nos mesmos diretórios dos agents são mantidos intactos — o desinstalador remove apenas os slots que ele mesmo gravou.
+
+Desinstalar não toca nos recursos que o kstack pode ter criado nos seus clusters (containers de debug, clones de pod, watcher jobs). Para removê-los, execute [`/cleanup`](/pt/reference/skills/cleanup/) **antes** de desinstalar, enquanto os Skills ainda estão disponíveis.

@@ -1,0 +1,114 @@
+---
+title: /exec
+description: Shell guiado por IA em um container de pod, node ou container de debug efêmero — compartilhado com o agent via tmux.
+---
+
+O Skill `/exec` é uma versão com IA do `kubectl exec`. Descreva o alvo em linguagem natural e o agent escolhe o mecanismo certo: um `exec` normal em um container em execução, um container de debug efêmero quando o alvo não tem um shell próprio utilizável, ou um shell privilegiado em um node.
+
+A sessão é executada dentro de uma janela **tmux** à qual você e o agent estão conectados simultaneamente. Você pode digitar, o agent pode digitar, e você verá a saída em tempo real.
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+Escopo em linguagem natural (namespaces, label selectors, nomes de workload) é suportado (veja [Visão geral](/pt/reference/skills/overview/)).
+
+:::note[Somente invocado pelo usuário]
+`/exec` é distribuído com `disable-model-invocation: true`, portanto o agent nunca iniciará um shell por conta própria — ele só executa quando você digitar explicitamente `/exec`. Isso é deliberado dado os modos privilegiados abaixo.
+:::
+
+:::caution[Segurança]
+`/exec` abre um shell interativo no qual você e o agent podem digitar. Os modos node e debug-container criam pods privilegiados com acesso no nível do host (`hostPID`, `hostNetwork`, sistema de arquivos do host montado em `/host`). Qualquer coisa visível no painel — incluindo secrets que você cole, variáveis de ambiente e saída de comandos — é lida pelo agent e pode ser enviada ao modelo. Veja [Segurança](/pt/concepts/security/) para o modelo de confiança completo.
+:::
+
+---
+
+## Requisitos
+
+`tmux` deve estar instalado e no `$PATH`. O Skill não executará sem ele.
+
+---
+
+## Modos
+
+O agent resolve o alvo a partir da sua descrição e escolhe um dos seguintes.
+
+### 1. Container de pod (padrão)
+
+O padrão para um pod em execução com um shell utilizável. Equivalente a `kubectl exec -it <pod> -c <container> -- <shell>`, com o container selecionado automaticamente quando o pod tem apenas um ou quando um é obviamente o principal.
+
+:::note[Comportamento]
+- Shell é detectado automaticamente (`bash`, depois `sh`, depois `ash`)
+- Container é inferido do spec do pod a menos que especificado como `<pod>/<container>`
+- Faz fallback para o modo debug-container automaticamente se nenhum shell estiver disponível
+:::
+
+### 2. Container de debug
+
+Acionado automaticamente quando o container alvo é distroless, scratch, ou de outra forma não tem shell — ou explicitamente via `/exec debug <pod>`. Equivalente a `kubectl debug -it <pod> --target=<container> --image=<toolbox>`, compartilhando o namespace de processo do alvo para que você possa inspecionar seu sistema de arquivos via `/proc/<pid>/root` e sua rede a partir do mesmo netns.
+
+:::note[Comportamento]
+- Compartilha o namespace de processo com o container alvo
+- O sistema de arquivos do alvo é visível em `/proc/1/root`
+- Usa `nicolaka/netshoot` por padrão (substitua com `--image`)
+:::
+
+### 3. Node
+
+Um shell root privilegiado em um node, para depuração no nível do host (logs do kubelet, `journalctl`, `crictl`, namespaces de rede). Implementado como um pod privilegiado de curta duração agendado no node alvo com `hostPID`, `hostNetwork` e o sistema de arquivos do host montado em `/host`.
+
+:::note[Comportamento]
+- Pod é criado no namespace "default" (a menos que especificado de outra forma)
+- Pod é deletado quando o usuário instrui o agent a fazê-lo
+- Usa `nicolaka/netshoot` por padrão
+:::
+
+---
+
+## Como a sessão é aberta
+
+Assim que o agent resolve o alvo e inicia o comando `exec` ou `debug` subjacente, ele:
+
+1. Inicia uma sessão tmux desanexada com um nome descritivo (ex.: `kstack-exec-api-server`).
+2. Tenta abrir uma nova janela de terminal no seu desktop e conectá-la a essa sessão — para que o shell apareça na sua frente.
+3. Imprime o comando `tmux attach` exato no chat, para que você possa se conectar manualmente a partir de qualquer terminal (útil por SSH, em um editor remoto, ou se a abertura da janela falhar).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+Você e o agent compartilham o mesmo painel. Qualquer um de vocês pode digitar comandos; ambos veem a saída completa. Para economizar tokens, o agent lerá a janela de forma conservadora, então você pode precisar pedir a ele para se atualizar sobre as últimas mudanças. Diga ao agent para encerrar a sessão e ele matará o pod que criou.
+
+---
+
+## O que o agent é instruído
+
+Além de iniciar a sessão, o Skill orienta o agent sobre como se comportar dentro dela:
+
+- Escolher o modo com menos privilégio que consegue responder à pergunta — exec normal antes de container de debug, container de debug antes de shell de node. Só escalar quando o modo atual não conseguir ver o que o usuário está perguntando.
+- Ler do painel tmux de forma conservadora para economizar tokens; incitar o usuário a rolar de volta em vez de re-ler um buffer grande sem ser solicitado.
+- Tratar tudo que estiver visível no painel (variáveis de ambiente, saída de comandos, texto colado) como potencialmente sensível — não repetir no chat a menos que o usuário peça.
+- Quando o usuário sinalizar que terminou, encerrar a sessão: sair do shell, matar a sessão tmux e deletar qualquer pod que o Skill criou (containers de debug, pods de shell de node).
+
+---
+
+## Opções
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>Imagem a usar para modos de node e debug-container (padrão <code>netshoot</code>).</dd>
+
+  <dt>`--attach`</dt>
+  <dd>Conectar o agent a uma sessão tmux kstack existente em vez de iniciar uma nova.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Iniciar uma nova sessão no estado desanexado — nenhuma janela de terminal é aberta, conecte manualmente.</dd>
+</dl>
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) também se aplicam.

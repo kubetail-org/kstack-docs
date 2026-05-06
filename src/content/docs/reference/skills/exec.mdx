@@ -1,0 +1,114 @@
+---
+title: /exec
+description: AI-guided shell into a pod container, node, or ephemeral debug container — shared with the agent over tmux.
+---
+
+The `/exec` skill is an AI-powered version of `kubectl exec`. Describe the target in natural language and the agent picks the right mechanism: a normal `exec` into a running container, an ephemeral debug container when the target has no usable shell of its own or a privileged shell on a node.
+
+The session runs inside a **tmux** window that both you and the agent are attached to simultaneously. You can type, the agent can type, and you will see the output in real time.
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+Natural-language scoping (namespaces, label selectors, workload names) is supported (see [Overview](/reference/skills/overview/)).
+
+:::note[User-invoked only]
+`/exec` ships with `disable-model-invocation: true`, so the agent will never start a shell on its own — it only runs when you explicitly type `/exec`. This is deliberate given the privileged modes below.
+:::
+
+:::caution[Security]
+`/exec` opens an interactive shell that both you and the agent can type into. Node and debug-container modes create privileged pods with host-level access (`hostPID`, `hostNetwork`, host filesystem mounted at `/host`). Anything visible in the pane — including secrets you paste, environment variables, and command output — is read by the agent and may be sent to the model. See [Security](/concepts/security/) for the full trust model.
+:::
+
+---
+
+## Requirements
+
+`tmux` must be installed and on `$PATH`. The skill will not run without it.
+
+---
+
+## Modes
+
+The agent resolves the target from your description and picks one of the following.
+
+### 1. Pod container (default)
+
+The default for a running pod with a usable shell. Equivalent to `kubectl exec -it <pod> -c <container> -- <shell>`, with the container auto-selected when the pod has only one or when one is obviously the primary.
+
+:::note[Behavior]
+- Shell is auto-detected (`bash`, then `sh`, then `ash`)
+- Container is inferred from the pod spec unless specified as `<pod>/<container>`
+- Falls back to debug-container mode automatically if no shell is available
+:::
+
+### 2. Debug container
+
+Triggered automatically when the target container is distroless, scratch, or otherwise has no shell — or explicitly via `/exec debug <pod>`. Equivalent to `kubectl debug -it <pod> --target=<container> --image=<toolbox>`, sharing the target's process namespace so you can inspect its filesystem via `/proc/<pid>/root` and its network from the same netns.
+
+:::note[Behavior]
+- Shares the process namespace with the target container
+- Target's filesystem is visible at `/proc/1/root`
+- Uses `nicolaka/netshoot` by default (swap with `--image`)
+:::
+
+### 3. Node
+
+A privileged root shell on a node, for host-level debugging (kubelet logs, `journalctl`, `crictl`, network namespaces). Implemented as a short-lived privileged pod scheduled onto the target node with `hostPID`, `hostNetwork`, and the host filesystem mounted at `/host`.
+
+:::note[Behavior]
+- Pod is created in the "default" namespace (unless otherwise specified)
+- Pod is deleted when user instructs agent to do so
+- Uses `nicolaka/netshoot` by default
+:::
+
+---
+
+## How the session opens
+
+Once the agent has resolved the target and started the underlying `exec` or `debug` command, it:
+
+1. Starts a detached tmux session with a descriptive name (e.g. `kstack-exec-api-server`).
+2. Tries to open a new terminal window on your desktop and attach it to that session — so the shell just appears in front of you.
+3. Prints the exact `tmux attach` command in chat, so you can connect manually from any terminal (useful over SSH, in a remote editor, or if the window spawn fails).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+You and the agent share the same pane. Either of you can type commands; both see the full output. To save tokens, the agent will read from the window conservatively so you may have to prod the agent to catch up on the latest changes. Tell the agent to tear down the session and it will kill the pod it created. 
+
+---
+
+## What the agent is told
+
+Beyond starting the session, the skill briefs the agent on how to behave inside it:
+
+- Pick the least-privileged mode that can answer the question — normal exec before debug container, debug container before node shell. Only escalate when the current mode can't see what the user is asking about.
+- Read from the tmux pane conservatively to save tokens; prod the user to scroll back rather than re-reading a large buffer unprompted.
+- Treat everything visible in the pane (environment variables, command output, pasted text) as potentially sensitive — don't echo it back into chat unless the user asks.
+- When the user signals they're done, tear down the session: exit the shell, kill the tmux session, and delete any pod the skill created (debug containers, node-shell pods).
+
+---
+
+## Options
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>Image to use for node and debug-container modes (default <code>netshoot</code>).</dd>
+
+  <dt>`--attach`</dt>
+  <dd>Attach the agent to an existing kstack tmux session instead of starting a new one.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Start a new session in the detached state — no terminal window is opened, attach manually.</dd>
+</dl>
+
+Global flags from [Overview](/reference/skills/overview/) also apply.

@@ -1,0 +1,34 @@
+---
+title: /cleanup
+description: Alle kstack-verwalteten Ressourcen aus dem Cluster entfernen.
+---
+
+Der `/cleanup`-Skill entfernt jede Ressource, die kstack im Cluster erstellt hat. Dieser Skill ist das Gegenstück zu [`/forget`](/de/reference/skills/forget/), das den lokalen Zustand löscht.
+
+```text
+/cleanup                      # clean up the current context
+```
+
+:::note[Nur vom Benutzer ausgeführt]
+`/cleanup` wird mit `disable-model-invocation: true` ausgeliefert. Der Agent startet niemals eigenständig eine Bereinigung — er wird nur ausgeführt, wenn du explizit `/cleanup` eingibst, da er Cluster-Ressourcen löscht.
+:::
+
+---
+
+## Was es entfernt
+
+Alles, was kstack im Cluster erstellt, wird mit `kstack.kubetail.com/owned-by=kstack` annotiert. Der Skill weist den Agent an, diese Ressourcen zu finden und zu löschen. In der Praxis umfasst das die Dinge, die andere Skills hinterlassen — ephemere Debug-Container, privilegierte Node-Shell-Pods, kurzlebige Toolbox-Pods von [`/exec`](/de/reference/skills/exec/) und alle temporären RBAC- oder ConfigMaps, die zu deren Unterstützung erstellt wurden. Der Agent wird angewiesen, alles ohne diese Annotation unberührt zu lassen.
+
+---
+
+## Wie es funktioniert
+
+Bevor etwas gelöscht wird, wird der Agent angewiesen, die gefundenen Ressourcen aufzulisten und dich zur Bestätigung aufzufordern. Ressourcen werden nach Namespace und Kind gruppiert, sodass du auf einen Blick sehen kannst, was als nächstes gelöscht wird. Du kannst den gesamten Satz genehmigen oder dem Agent in natürlicher Sprache mitteilen, bestimmte Elemente zu überspringen.
+
+Wenn ein Löschen fehlschlägt — in der Regel ein Finalizer- oder Berechtigungsproblem — meldet der Agent, welche Ressourcen verbleiben und warum, anstatt blind erneut zu versuchen.
+
+---
+
+## Optionen
+
+Globale Flags aus [Übersicht](/de/reference/skills/overview/) gelten.

@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: "Récupération des métriques CPU, mémoire et autres ressources pour les pods, nœuds et workloads — en langage naturel, en lecture seule."
+---
+
+Le Skill `/metrics` est un outil de récupération de métriques assisté par IA. Décrivez ce que vous souhaitez voir et l'agent résout la cible appropriée, choisit une fenêtre temporelle raisonnée et renvoie un résumé compact. Il est en lecture seule et ne modifie jamais l'état du cluster.
+
+Lors de l'invocation de `/metrics`, l'agent est instruit d'interroger `metrics-server` pour les données en direct et Prometheus pour l'historique. Si un outil requis n'est pas disponible, l'agent proposera de l'installer. Il reçoit également des directives sur la présentation des données pour que la sortie reste bornée et économique à traiter par le modèle.
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+Le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads, fenêtres temporelles, noms de métriques) est pris en charge (voir [Overview](/fr/reference/skills/overview/)). L'agent traduit votre description en requête appropriée selon la source disponible.
+
+---
+
+## Sources de données
+
+Sources, par ordre de préférence selon la requête :
+
+- **`metrics-server`** — utilisé pour les snapshots en direct via `kubectl top`. Si Prometheus n'est pas disponible, le Skill se replie sur cette source pour toute requête et l'indique dans la sortie : la réponse est un échantillon ponctuel et non une fenêtre.
+- **Prometheus** — utilisé lorsque l'agent détecte un Prometheus in-cluster et que la question porte sur une fenêtre temporelle. Interrogé via son service in-cluster en PromQL.
+
+Le Skill ne scrape jamais les exporters directement et ne lit pas les endpoints de métriques extérieurs au cluster (ex. DataDog, Grafana Cloud).
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Au-delà des instructions sur la source à interroger, le Skill instruit l'agent sur le comportement à adopter :
+
+- Préférer Prometheus à `metrics-server` dès que la question porte sur une fenêtre temporelle ; se replier sur `metrics-server` pour les snapshots en direct mais étiqueter la sortie `source: metrics-server` pour que le lecteur ne soit pas induit en erreur sur le fenêtrage.
+- Rapporter des statistiques récapitulatives (p50, p95, max) plutôt que de faire transiter la série complète dans le modèle.
+- Si la requête résolue couvre beaucoup plus de pods ou une fenêtre plus large que ce que l'utilisateur avait probablement en tête, afficher la requête résolue et demander confirmation avant de l'exécuter.
+- Signaler les jeux de labels embarquant des IDs de tenant, d'utilisateur ou des segments de chemin comme potentiellement sensibles ; ne pas les répercuter dans le chat sauf si l'utilisateur le demande explicitement.
+- Router selon la section [Renvois](#renvois) ci-dessous plutôt qu'élargir le Skill en outil d'observabilité généraliste.
+
+---
+
+## Sécurité
+
+`/metrics` est en lecture seule. Il émet des requêtes `kubectl top` et des range queries Prometheus sur la cible que vous avez décrite, et rien d'autre — pas d'exec, pas d'écritures, pas d'accès au contenu ou aux logs des pods. Si la description se résout à plus de pods ou une fenêtre plus large que prévu, l'agent vous montrera la requête résolue et demandera confirmation avant de l'exécuter.
+
+Les valeurs de métriques elles-mêmes contiennent rarement des données sensibles, mais les jeux de labels peuvent en contenir — un nom de métrique personnalisé ou un label embarquant un ID de tenant, d'utilisateur ou un segment de chemin se retrouve dans le contexte de l'agent au même titre que les lignes de logs. Affinez les requêtes au workload qui vous intéresse plutôt que d'utiliser des wildcards larges. Voir [Sécurité](/fr/concepts/security/) pour le modèle de confiance complet.
+
+---
+
+## Renvois
+
+Pour tout ce qui sort du cadre de l'utilisation des ressources, l'agent renvoie à un Skill voisin plutôt qu'élargir `/metrics` :
+
+- [`/logs`](/fr/reference/skills/logs/) lorsque vous voulez comprendre *pourquoi* le CPU ou la mémoire d'un pod a évolué
+- [`/investigate`](/fr/reference/skills/investigate/) lorsque l'utilisation est le symptôme d'une ressource défaillante et que vous voulez le contexte de cause racine
+- [`/audit-cost`](/fr/reference/skills/audit-cost/) pour un balayage complet de dimensionnement optimal plutôt qu'une vérification ponctuelle
+
+---
+
+## Options
+
+`/metrics` ne prend aucun flag spécifique au Skill en version initiale. Affinez la cible, la métrique et la fenêtre temporelle en langage naturel dans le prompt ou dans une question de suivi.
+
+Les flags globaux de [Overview](/fr/reference/skills/overview/) s'appliquent.

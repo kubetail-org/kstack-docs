@@ -1,0 +1,114 @@
+---
+title: /exec
+description: 'Shell guiado por IA en un contenedor de pod, node o contenedor de depuración efímero, compartido con el agente a través de tmux.'
+---
+
+El Skill `/exec` es una versión potenciada por IA de `kubectl exec`. Describa el objetivo en lenguaje natural y el agente elige el mecanismo correcto: un `exec` normal en un contenedor en ejecución, un contenedor de depuración efímero cuando el objetivo no tiene un shell propio utilizable, o un shell privilegiado en un node.
+
+La sesión se ejecuta dentro de una ventana **tmux** a la que tanto usted como el agente están conectados simultáneamente. Usted puede escribir, el agente puede escribir, y verá la salida en tiempo real.
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+La delimitación en lenguaje natural (namespaces, selectores de etiquetas, nombres de workloads) está disponible (consulte [Descripción general](/es/reference/skills/overview/)).
+
+:::note[Solo invocado por el usuario]
+`/exec` se distribuye con `disable-model-invocation: true`, por lo que el agente nunca iniciará un shell por sí solo — solo se ejecuta cuando usted escribe explícitamente `/exec`. Esto es deliberado dado los modos privilegiados descritos a continuación.
+:::
+
+:::caution[Seguridad]
+`/exec` abre un shell interactivo en el que tanto usted como el agente pueden escribir. Los modos de node y de contenedor de depuración crean pods privilegiados con acceso a nivel de host (`hostPID`, `hostNetwork`, sistema de archivos del host montado en `/host`). Todo lo visible en el panel — incluyendo secretos que pegue, variables de entorno y salida de comandos — es leído por el agente y puede enviarse al modelo. Consulte [Seguridad](/es/concepts/security/) para el modelo de confianza completo.
+:::
+
+---
+
+## Requisitos
+
+`tmux` debe estar instalado y en `$PATH`. El Skill no funcionará sin él.
+
+---
+
+## Modos
+
+El agente resuelve el objetivo a partir de su descripción y elige uno de los siguientes.
+
+### 1. Contenedor de pod (por defecto)
+
+El modo por defecto para un pod en ejecución con un shell utilizable. Equivalente a `kubectl exec -it <pod> -c <container> -- <shell>`, con el contenedor seleccionado automáticamente cuando el pod tiene solo uno o cuando uno es claramente el principal.
+
+:::note[Comportamiento]
+- El shell se detecta automáticamente (`bash`, luego `sh`, luego `ash`)
+- El contenedor se infiere del spec del pod a menos que se especifique como `<pod>/<container>`
+- Recurre automáticamente al modo de contenedor de depuración si no hay shell disponible
+:::
+
+### 2. Contenedor de depuración
+
+Se activa automáticamente cuando el contenedor objetivo es distroless, scratch u otro sin shell — o explícitamente vía `/exec debug <pod>`. Equivalente a `kubectl debug -it <pod> --target=<container> --image=<toolbox>`, compartiendo el namespace de procesos del objetivo para que pueda inspeccionar su sistema de archivos vía `/proc/<pid>/root` y su red desde el mismo netns.
+
+:::note[Comportamiento]
+- Comparte el namespace de procesos con el contenedor objetivo
+- El sistema de archivos del objetivo es visible en `/proc/1/root`
+- Usa `nicolaka/netshoot` por defecto (cambie con `--image`)
+:::
+
+### 3. Node
+
+Un shell root privilegiado en un node, para depuración a nivel de host (logs de kubelet, `journalctl`, `crictl`, namespaces de red). Implementado como un pod privilegiado de corta duración programado en el node objetivo con `hostPID`, `hostNetwork` y el sistema de archivos del host montado en `/host`.
+
+:::note[Comportamiento]
+- El pod se crea en el namespace "default" (a menos que se especifique otro)
+- El pod se elimina cuando el usuario le indica al agente que lo haga
+- Usa `nicolaka/netshoot` por defecto
+:::
+
+---
+
+## Cómo se abre la sesión
+
+Una vez que el agente ha resuelto el objetivo y arrancado el comando subyacente `exec` o `debug`:
+
+1. Inicia una sesión tmux desconectada con un nombre descriptivo (p. ej. `kstack-exec-api-server`).
+2. Intenta abrir una nueva ventana de terminal en su escritorio y conectarla a esa sesión — para que el shell aparezca directamente frente a usted.
+3. Imprime el comando `tmux attach` exacto en el chat, para que pueda conectarse manualmente desde cualquier terminal (útil por SSH, en un editor remoto, o si falla la apertura de la ventana).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+Usted y el agente comparten el mismo panel. Cualquiera de los dos puede escribir comandos; ambos ven la salida completa. Para ahorrar tokens, el agente leerá desde la ventana de forma conservadora, por lo que puede que tenga que incentivarlo para que se ponga al día con los últimos cambios. Dígale al agente que cierre la sesión y eliminará el pod que creó.
+
+---
+
+## Qué se le indica al agente
+
+Más allá de iniciar la sesión, el Skill orienta al agente sobre cómo comportarse dentro de ella:
+
+- Elegir el modo con menos privilegios que pueda responder la pregunta — exec normal antes que contenedor de depuración, contenedor de depuración antes que shell de node. Escalar solo cuando el modo actual no pueda ver lo que el usuario pregunta.
+- Leer desde el panel tmux de forma conservadora para ahorrar tokens; incitar al usuario a desplazarse en lugar de volver a leer un buffer grande sin que se le pida.
+- Tratar todo lo visible en el panel (variables de entorno, salida de comandos, texto pegado) como potencialmente sensible — no repetirlo en el chat a menos que el usuario lo solicite.
+- Cuando el usuario indique que terminó, cerrar la sesión: salir del shell, eliminar la sesión tmux y borrar cualquier pod que haya creado el Skill (contenedores de depuración, pods de shell de node).
+
+---
+
+## Opciones
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>Imagen a usar para los modos de node y contenedor de depuración (por defecto <code>netshoot</code>).</dd>
+
+  <dt>`--attach`</dt>
+  <dd>Conectar el agente a una sesión tmux de kstack existente en lugar de iniciar una nueva.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Iniciar una nueva sesión en estado desconectado — no se abre ninguna ventana de terminal, conéctese manualmente.</dd>
+</dl>
+
+También se aplican los flags globales de [Descripción general](/es/reference/skills/overview/).

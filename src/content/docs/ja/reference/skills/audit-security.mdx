@@ -1,0 +1,63 @@
+---
+title: /audit-security
+description: 'RBACレビュー、Podセキュリティポスチャー、権限最小化の推奨事項。'
+---
+
+`/audit-security` スキルは、過剰な権限を持つIDとワークロードを検索します。使用量を超えるアクセス権を持つ `ServiceAccount`、rootで実行されているまたはホストレベルのエスケープを持つPod、Namespaceスコープのロールで十分なところにクラスター全体の権限を付与するバインディングなどです。
+
+引数なしで実行するとフルスイープ、ワークフロー名を指定するとレポートのスコープを絞り込めます。
+
+```text
+/audit-security                    # full sweep
+/audit-security rbac               # single workflow
+/audit-security pods in kube-system
+```
+
+自然言語スコープ（Namespace、ラベルセレクター、ワークロード名）はすべてのワークフローでサポートされています（[概要](/ja/reference/skills/overview/)を参照）。
+
+---
+
+## ワークフロー
+
+### 1. RBAC
+
+:::note[チェック項目]
+- ワイルドカード動詞またはリソース（`*`）を付与するClusterRoleおよびRole
+- `cluster-admin` およびその他の高権限組み込みロールへのバインディング
+- 存在しなくなったサブジェクトを参照する `RoleBinding` および `ClusterRoleBinding`
+:::
+
+ソース：Kubernetes API。
+
+### 2. Podセキュリティ
+
+:::note[チェック項目]
+- rootで実行されている、`securityContext` がない、または `allowPrivilegeEscalation: true` のコンテナ
+- `privileged: true`、`hostNetwork`、`hostPID`、または `hostIPC` を持つPod
+- 書き込み可能なルートファイルシステムと危険なLinuxケーパビリティ（`SYS_ADMIN`、`NET_ADMIN` など）
+- `seccompProfile` が欠如しているワークロード、およびPod Security Standardsの `baseline` または `restricted` プロファイルに失敗するワークロード
+:::
+
+ソース：Kubernetes API、アップストリームの[Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)に対して評価。
+
+### 3. SecretとServiceAccountトークン
+
+:::note[チェック項目]
+- 消費者のない孤立したSecret
+- `automountServiceAccountToken` が有効になっているが、そのSAにRoleBindingがないPod
+- クラスター上にまだ存在するレガシーの長期 `kubernetes.io/service-account-token` Secret
+:::
+
+ソース：Kubernetes API。
+
+---
+
+## エージェントへの指示
+
+ワークフローに加えて、スキルはエージェントにレポートの方法を指示します。
+
+- 検出結果を影響範囲でランク付けします — クラスタースコープのワイルドカードをNamespaceスコープより上位に、ホストエスケープをseccompプロファイル欠如より上位にします。
+- RBACチェックは**静的**であることを明示します：`Role` が付与するものを検索するのであり、サブジェクトが実際に使用するものではありません。真に未使用の権限を検出するには監査ログ分析が必要ですが、このスキルは実行しません。
+- `Secret` オブジェクトは名前、Namespace、タイプのみで参照し、内容を読み取ったり表示したりしません。
+- 問題のある動詞やフラグの名前を挙げるだけでなく、検出結果が重要な理由（その権限が何を可能にするか）を1行で説明します。
+- 特定のワークロードについては [`/investigate`](/ja/reference/skills/investigate/) に、mTLSとメッシュポスチャー（Podセキュリティに隣接）については [`/audit-network`](/ja/reference/skills/audit-network/) に渡します。

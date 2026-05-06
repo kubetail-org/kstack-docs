@@ -1,0 +1,44 @@
+---
+title: '개요'
+description: '모든 kstack 스킬에 공통되는 규칙 — 자연어 인수 및 글로벌 플래그.'
+---
+
+이 페이지에서는 모든 스킬에 공통적인 사항을 설명합니다.
+
+## 자연어 인수
+
+스킬 페이지에 달리 명시되지 않는 한, 스킬 이름 뒤에 입력하는 모든 내용은 자유 형식 지시문으로 에이전트에 전달됩니다. 문법을 외울 필요 없이 원하는 내용을 설명하면 됩니다.
+
+```text
+> /cluster-status only pods
+> /investigate backend server keeps crashing
+> /logs errors from the last hour on api pods
+> /audit-outdated container images in kube-system
+```
+
+에이전트는 의도를 파악하고, 적합한 리소스를 선택하며, 그에 맞게 범위를 좁힙니다. 명시적으로 지정하려는 경우 플래그(아래)도 계속 사용할 수 있습니다 — 자유롭게 혼합하여 사용하십시오.
+
+## K8s 컨텍스트
+
+기본적으로 스킬은 별도로 지정하지 않는 한 `kubeconfig` 기본 컨텍스트를 사용합니다. 자연어로 컨텍스트를 변경할 수 있으며 kstack은 세션 나머지 기간 동안 선택을 기억합니다:
+
+```text
+> /cluster-status
+[ ... ]
+> redo with prod
+[ ... ]
+```
+
+## 글로벌 플래그
+
+다음 플래그는 모든 스킬에서 지원됩니다:
+
+<dl>
+  <dt>`--context <ctx>`</dt>
+  <dd>현재 kubeconfig 컨텍스트를 재정의합니다.</dd>
+
+  <dt>`--help`</dt>
+  <dd>브라우저에서 스킬의 레퍼런스 문서 페이지를 엽니다.</dd>
+</dl>
+
+시간이 지남에 따라 더 많은 플래그가 추가될 예정입니다. 개별 스킬 페이지에 자체 플래그가 문서화된 경우 글로벌 플래그도 추가로 사용할 수 있다고 가정하십시오.

@@ -1,0 +1,106 @@
+---
+title: /audit-outdated
+description: '오래된 클러스터 컴포넌트, 알려진 CVE, 사용 가능한 버전 업그레이드.'
+---
+
+`/audit-outdated` 스킬은 클러스터의 모든 계층에서 버전 드리프트를 찾습니다: 컨트롤 플레인, 노드, 컨테이너 이미지, Helm 차트, CRD, 오퍼레이터, 그리고 매니페스트가 대상으로 하는 API 표면. 각 계층에는 "최신"의 고유한 정의와 고유한 드리프트 허용 범위가 있습니다.
+
+인수 없이 실행하면 전체 스윕을 수행하거나, 워크플로 이름을 지정하여 보고서 범위를 좁힐 수 있습니다.
+
+```text
+/audit-outdated            # full sweep
+/audit-outdated images     # single workflow
+/audit-outdated cves in kube-system
+```
+
+모든 워크플로에서 자연어 범위 지정(네임스페이스, 레이블 셀렉터, 심각도 임계값)이 지원됩니다([개요](/ko/reference/skills/overview/) 참조).
+
+---
+
+## 워크플로
+
+### 1. Kubernetes 버전 스큐
+
+:::note[검사 항목]
+- 컨트롤 플레인 마이너 버전 대비 해당 마이너의 최신 패치
+- 각 노드의 `kubelet` 버전 대비 컨트롤 플레인 마이너
+- 업스트림 Kubernetes 지원 매트릭스 기준 EOL까지의 거리
+:::
+
+출처: 공개된 [Kubernetes 릴리스 일정](https://kubernetes.io/releases/).
+
+### 2. 더 이상 사용되지 않거나 제거된 API 버전
+
+:::note[검사 항목]
+- 현재 마이너에서 deprecated되거나 다음 마이너에서 제거될 API 버전을 사용하는 라이브 오브젝트
+- deprecated된 `apiextensions.k8s.io` 버전에 등록된 어드미션 웹훅 및 CRD
+:::
+
+출처: 사용 가능한 경우 [`pluto`](https://github.com/FairwindsOps/pluto) 및 [`kubent`](https://github.com/doitintl/kube-no-trouble), 그리고 공개된 [Kubernetes API 지원 중단 일정](https://kubernetes.io/docs/reference/using-api/deprecation-guide/)을 폴백으로 사용.
+
+### 3. 컨테이너 이미지 최신성
+
+:::note[검사 항목]
+- 소스 레지스트리에서 사용 가능한 최상위 semver 미만으로 고정된 태그
+- 플로팅 태그(`:latest`, 버전 없음) — "오래됨"이 정의되지 않으므로 별도 보고
+- 다이제스트 드리프트 — 동일한 태그이지만 업스트림에 더 새로운 다이제스트 존재
+- 이미지에 SBOM이 첨부된 경우 베이스 이미지 수명
+:::
+
+출처: Docker Hub, GHCR, quay.io, gcr.io. 현재 프라이빗 레지스트리는 지원되지 않습니다.
+
+### 4. Helm 차트 및 릴리스
+
+:::note[검사 항목]
+- 설치된 차트 버전 대비 구성된 레포의 최신 버전
+- `Chart.yaml`에 선언된 서브차트 의존성 대비 업스트림 버전
+- 업스트림에서 `deprecated: true`로 표시된 차트
+:::
+
+출처: 구성된 Helm 레포 인덱스. OCI 호스팅 차트는 OCI 레지스트리에서 직접 읽습니다.
+
+### 5. 오퍼레이터, CRD 및 컨트롤러
+
+:::note[검사 항목]
+- 오퍼레이터 버전 대비 업스트림 릴리스
+- 오래된 컨트롤러에 매핑된 CRD 플래그
+:::
+
+출처: 워크플로 3과 4의 레지스트리 및 Helm 레포 데이터를 재사용.
+
+### 6. 알려진 취약점
+
+:::note[검사 항목]
+- 실행 중인 컨테이너 이미지의 CVE
+- Kubernetes 버전 자체의 CVE
+:::
+
+출처: [Trivy](https://github.com/aquasecurity/trivy) 및 [공식 Kubernetes CVE 피드](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/).
+
+### 7. 노드 OS 및 커널
+
+:::note[검사 항목]
+- 노드 OS 이미지 대비 배포판의 현재 릴리스 (예: Ubuntu, Amazon Linux)
+- 공개된 CVE 대비 커널 버전
+:::
+
+출처: 최신 OS 및 커널 버전을 위한 배포판 릴리스 피드, 그리고 적극적으로 악용되는 커널 CVE 에스컬레이션을 위한 [CISA KEV 카탈로그](https://www.cisa.gov/known-exploited-vulnerabilities-catalog).
+
+---
+
+## 데이터 최신성
+
+모든 보고서에는 각 인덱스(Trivy DB, Helm 레포, 레지스트리 태그 목록, Kubernetes 릴리스 일정)가 마지막으로 갱신된 시점을 나타내는 "데이터 수명" 푸터가 포함됩니다.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+워크플로 외에도 스킬은 에이전트에게 보고 방법을 안내합니다:
+
+- 항상 데이터 수명 푸터를 포함하십시오 — 오래된 인덱스는 오래된 결과를 생성하며 독자는 이를 알아야 합니다.
+- 하나의 오래된 이미지가 많은 파드에서 공유된다고 해서 보고서를 지배하지 않도록 이미지 다이제스트로 중복을 제거합니다.
+- 가능한 경우 CVE 항목에 심각도 및 CISA KEV 상태를 포함합니다; 알려진 악용이 없는 CVSS-high 결과보다 KEV 적중을 상위에 순위 지정합니다.
+- "지원 기간 내 드리프트"와 "EOL"을 명시적으로 구분합니다 — 전자는 일상적인 것이고 후자는 긴급한 것입니다.
+- 지원 목록에 없는 레지스트리(워크플로 3)의 경우 이미지를 자동으로 건너뛰는 대신 명시합니다.
+- 단일 워크로드의 오래된 이미지가 초점인 경우 [`/investigate`](/ko/reference/skills/investigate/)로 전달합니다.

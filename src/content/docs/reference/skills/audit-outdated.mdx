@@ -1,0 +1,106 @@
+---
+title: /audit-outdated
+description: Outdated cluster components, known CVEs, and available version bumps.
+---
+
+The `/audit-outdated` skill looks for version drift across every layer of the cluster: control plane, nodes, container images, Helm charts, CRDs, operators, and the API surface your manifests target. Each layer has its own notion of "latest" and its own drift tolerances.
+
+Run it without arguments for a full sweep, or name a workflow to scope the report.
+
+```text
+/audit-outdated            # full sweep
+/audit-outdated images     # single workflow
+/audit-outdated cves in kube-system
+```
+
+Natural-language scoping (namespaces, label selectors, severity thresholds) is supported on every workflow (see [Overview](/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. Kubernetes version skew
+
+:::note[Checks]
+- Control-plane minor vs. the latest patch on that minor
+- `kubelet` version on each node vs. the control-plane minor
+- Distance from EOL per the upstream Kubernetes support matrix
+:::
+
+Sources: the published [Kubernetes release schedule](https://kubernetes.io/releases/).
+
+### 2. Deprecated & removed API versions
+
+:::note[Checks]
+- Live objects using API versions deprecated in the current minor or removed in the next one
+- Admission webhooks and CRDs registered against deprecated `apiextensions.k8s.io` versions
+:::
+
+Sources: [`pluto`](https://github.com/FairwindsOps/pluto) and [`kubent`](https://github.com/doitintl/kube-no-trouble) when available, with the published [Kubernetes API deprecation schedule](https://kubernetes.io/docs/reference/using-api/deprecation-guide/) as a fallback.
+
+### 3. Container image freshness
+
+:::note[Checks]
+- Tags pinned below the highest semver available in the source registry
+- Floating tags (`:latest`, unversioned), reported separately since "outdated" is undefined
+- Digest drift — same tag, newer digest upstream
+- Base-image age when the image has an SBOM attached
+:::
+
+Sources: Docker Hub, GHCR, quay.io, and gcr.io. Currently, private registries are not supported.
+
+### 4. Helm charts & releases
+
+:::note[Checks]
+- Installed chart versions vs. latest in the configured repo
+- Subchart dependencies declared in `Chart.yaml` vs. upstream versions
+- Charts marked `deprecated: true` upstream
+:::
+
+Sources: the configured Helm repo indexes. OCI-hosted charts are read directly from the OCI registry.
+
+### 5. Operators, CRDs, and their controllers
+
+:::note[Checks]
+- Operator versions vs. upstream releases
+- Flag CRDs mapped to outdated controllers
+:::
+
+Sources: reuses the registry and Helm repo data from workflows 3 and 4.
+
+### 6. Known vulnerabilities
+
+:::note[Checks]
+- CVEs in running container images
+- CVEs in the Kubernetes version itself
+:::
+
+Sources: [Trivy](https://github.com/aquasecurity/trivy) and the [official Kubernetes CVE feed](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/).
+
+### 7. Node OS & kernel
+
+:::note[Checks]
+- Node OS image vs. the distro's current release (e.g. Ubuntu, Amazon Linux)
+- Kernel version against published CVEs
+:::
+
+Sources: distro release feeds for the latest published OS and kernel versions, and the [CISA KEV catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) for escalating actively exploited kernel CVEs.
+
+---
+
+## Data freshness
+
+Every report includes a "data age" footer: when each index (Trivy DB, Helm repos, registry tag lists, Kubernetes release schedule) was last refreshed.
+
+---
+
+## What the agent is told
+
+Beyond the workflows, the skill briefs the agent on how to report:
+
+- Always include the data-age footer — stale indexes produce stale findings, and the reader needs to know.
+- De-duplicate by image digest so one outdated image shared across many pods doesn't dominate the report.
+- Include severity and CISA KEV status for CVE entries when available; rank KEV hits above CVSS-high findings without known exploitation.
+- Distinguish "drift within the supported window" from "EOL" explicitly — the first is routine, the second is urgent.
+- For registries not in the supported list (workflow 3), say so rather than silently skipping the image.
+- Hand off to [`/investigate`](/reference/skills/investigate/) when a single workload's outdated image is the focus.

@@ -1,0 +1,63 @@
+---
+title: /audit-security
+description: 'RBAC 검토, 파드 보안 포스처, 권한 축소 권장 사항.'
+---
+
+`/audit-security` 스킬은 과도한 권한을 가진 ID와 워크로드를 찾습니다: 실제 사용보다 더 많은 접근 권한을 가진 `ServiceAccount`, root 또는 호스트 수준 탈출을 사용하여 실행되는 파드, 그리고 네임스페이스 범위 역할로 충분한데 클러스터 전체 권한을 부여하는 바인딩.
+
+인수 없이 실행하면 전체 스윕을 수행하거나, 워크플로 이름을 지정하여 보고서 범위를 좁힐 수 있습니다.
+
+```text
+/audit-security                    # full sweep
+/audit-security rbac               # single workflow
+/audit-security pods in kube-system
+```
+
+모든 워크플로에서 자연어 범위 지정(네임스페이스, 레이블 셀렉터, 워크로드 이름)이 지원됩니다([개요](/ko/reference/skills/overview/) 참조).
+
+---
+
+## 워크플로
+
+### 1. RBAC
+
+:::note[검사 항목]
+- 와일드카드 동사 또는 리소스(`*`)를 부여하는 ClusterRole 및 Role
+- `cluster-admin` 및 기타 고권한 내장 역할에 대한 바인딩
+- 더 이상 존재하지 않는 주체를 참조하는 `RoleBinding` 및 `ClusterRoleBinding`
+:::
+
+출처: Kubernetes API.
+
+### 2. 파드 보안
+
+:::note[검사 항목]
+- root로 실행되거나, `securityContext`가 없거나, `allowPrivilegeEscalation: true`인 컨테이너
+- `privileged: true`, `hostNetwork`, `hostPID`, `hostIPC`를 가진 파드
+- 쓰기 가능한 루트 파일 시스템 및 위험한 Linux 기능 (`SYS_ADMIN`, `NET_ADMIN` 등)
+- `seccompProfile` 누락 및 파드 보안 표준(Pod Security Standards) `baseline` 또는 `restricted` 프로파일을 만족하지 못하는 워크로드
+:::
+
+출처: Kubernetes API, 업스트림 [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) 기준으로 평가.
+
+### 3. Secret 및 ServiceAccount 토큰
+
+:::note[검사 항목]
+- 소비자가 없는 고아 시크릿
+- SA에 RoleBinding이 없는데 `automountServiceAccountToken`이 활성화된 파드
+- 클러스터에 여전히 존재하는 오래된 레거시 `kubernetes.io/service-account-token` 시크릿
+:::
+
+출처: Kubernetes API.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+워크플로 외에도 스킬은 에이전트에게 보고 방법을 안내합니다:
+
+- 폭발 반경을 기준으로 결과 순위를 매깁니다 — 네임스페이스 범위 와일드카드보다 클러스터 범위 와일드카드를, seccomp 프로파일 누락보다 호스트 탈출을 상위에 배치합니다.
+- RBAC 검사는 **정적**임을 명시합니다: `Role`이 부여하는 것을 찾는 것이지, 주체가 실제로 사용하는 것을 찾는 것이 아닙니다. 진정으로 사용되지 않는 권한을 감지하려면 감사 로그 분석이 필요하며, 이 스킬은 그것을 수행하지 않습니다.
+- `Secret` 오브젝트는 이름, 네임스페이스, 타입만으로 참조합니다 — 내용을 읽거나 노출하지 않습니다.
+- 문제가 되는 동사나 플래그의 이름만 나열하지 않고 결과가 중요한 이유(해당 권한이 허용하는 것)를 한 줄로 설명합니다.
+- 특정 워크로드는 [`/investigate`](/ko/reference/skills/investigate/)로, 파드 보안에 인접한 mTLS 및 서비스 메시 포스처는 [`/audit-network`](/ko/reference/skills/audit-network/)로 전달합니다.

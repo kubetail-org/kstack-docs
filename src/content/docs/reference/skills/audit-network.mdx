@@ -1,0 +1,81 @@
+---
+title: /audit-network
+description: NetworkPolicy, Service, Ingress, Gateway API, DNS, and encryption sanity checks.
+---
+
+The `/audit-network` skill looks for broken or missing pieces in cluster networking: `NetworkPolicy` instances that don't match anything, `Service` instances with no endpoints, `Ingress` and `GatewayAPI` routes that won't resolve, DNS problems, and workloads talking in plaintext when a mesh is available.
+
+Run it without arguments for a full sweep, or name a workflow to scope the report.
+
+```text
+/audit-network                         # full sweep
+/audit-network policies                # single workflow
+/audit-network ingress in prod
+```
+
+Natural-language scoping (namespaces, label selectors, workload names) is supported on every workflow (see [Overview](/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. NetworkPolicy
+
+:::note[Checks]
+- Namespaces with no default-deny and pods covered by zero policies
+- Policies whose `podSelector` or peer selectors match no pods or namespaces
+- Rules referencing ports or protocols the target pods don't expose
+:::
+
+Sources: Kubernetes API.
+
+### 2. Service
+
+:::note[Checks]
+- Services with zero ready endpoints
+- `selector` / pod label mismatches and `port` / `targetPort` mismatches
+- Headless Services (`clusterIP: None`) not backing a StatefulSet
+:::
+
+Sources: Kubernetes API.
+
+### 3. Ingress & GatewayAPI
+
+:::note[Checks]
+- Hostname collisions across Ingresses or Gateway routes
+- TLS entries referencing missing or expired Secrets
+- Backends pointing at Services that don't exist or have no endpoints
+:::
+
+Sources: Kubernetes API, including `gateway.networking.k8s.io` when the CRDs are installed.
+
+### 4. DNS
+
+:::note[Checks]
+- CoreDNS pod health and recent restarts
+- Elevated NXDOMAIN or SERVFAIL rates in CoreDNS metrics
+- Stub domains and forwarders in the CoreDNS ConfigMap that don't resolve
+:::
+
+Sources: the CoreDNS `Deployment`, its `ConfigMap`, and its Prometheus metrics when exposed.
+
+### 5. Encryption & mTLS
+
+:::note[Checks]
+- Workloads outside the mesh's sidecar or ambient coverage
+- Namespaces or workloads in permissive (plaintext-allowed) mTLS mode
+:::
+
+Sources: Istio, Linkerd, or Cilium CRDs — only runs when one of these meshes is detected.
+
+---
+
+## What the agent is told
+
+Beyond the workflows, the skill briefs the agent on how to scope and report:
+
+- Skip the mesh and Gateway API workflows unless the relevant CRDs are installed — absence is not a finding.
+- For TLS checks, note when Secret contents can't be read due to RBAC rather than reporting a false "expired".
+- For DNS active-probe checks, state the probe source (in-cluster pod used for resolution) so failures can be interpreted.
+- Group findings by workflow and include the evidence (selectors, endpoints, ConfigMap keys) rather than only the verdict.
+- Hand off to [`/logs`](/reference/skills/logs/) for CoreDNS logs, or [`/investigate`](/reference/skills/investigate/) when a single workload is the root cause.

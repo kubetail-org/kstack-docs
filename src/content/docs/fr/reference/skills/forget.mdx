@@ -1,0 +1,50 @@
+---
+title: /forget
+description: "Vide le cache local de kstack et supprime ce qu'il a appris sur vos clusters."
+---
+
+Le Skill `/forget` efface l'état local de kstack sur votre machine. Au fil du temps, kstack constitue une mémoire de travail de vos clusters — résultats de requêtes récentes, intégrations détectées, empreintes de ressources et baselines utilisées pour détecter les anomalies. Ce Skill force l'effacement de ces données pour que l'agent reparte sur une ardoise vierge.
+
+Ce Skill ne touche à rien dans le cluster. Pour supprimer les ressources gérées par kstack dans le cluster lui-même, voir [`/cleanup`](/fr/reference/skills/cleanup/).
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[Invoqué par l'utilisateur uniquement]
+`/forget` est livré avec `disable-model-invocation: true`. L'agent n'effacera jamais l'état local de sa propre initiative — le Skill s'exécute uniquement lorsque vous tapez explicitement `/forget`, pour éviter une perte de contexte en cache inattendue.
+:::
+
+---
+
+## Ce qu'il efface
+
+L'état est stocké sous `~/.config/kstack/`, partitionné par contexte kubeconfig — oublier `staging` n'affecte jamais `prod`.
+
+:::note[État local]
+- **Cache** (`~/.config/kstack/cache/<context>/`) — résultats de requêtes récentes, buffers de logs, tables de déduplication, état des watcher jobs en cours. Peu coûteux à reconstruire ; effacé librement.
+- **État appris** (`~/.config/kstack/state/<context>/`) — intégrations détectées, empreintes de ressources, baselines, préférences par cluster. Reconstruit à la prochaine utilisation, mais peut nécessiter quelques interactions pour se reformer complètement.
+:::
+
+Par défaut, le Skill efface les deux pour le contexte courant.
+
+---
+
+## Quand l'utiliser
+
+- Le cluster a été reconstruit ou migré et son ancienne identité ne correspond plus à ce dont kstack se souvient.
+- Vous souhaitez que kstack réapprenne depuis zéro — les baselines semblent périmées, ou une session précédente lui a appris quelque chose d'incorrect.
+- Vous transmettez la machine et ne souhaitez laisser aucun état spécifique au cluster.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>Effacer le cache et l'état appris pour tous les contextes, pas seulement le contexte courant</dd>
+</dl>
+
+Les flags globaux de [Overview](/fr/reference/skills/overview/) s'appliquent également.

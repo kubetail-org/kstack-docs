@@ -1,0 +1,42 @@
+---
+title: 简介
+description: Kstack 是 Claude Code 的技能包，以智能高效的方式帮助你对 K8s 集群执行监控、故障排除和审计任务。
+---
+
+Kstack 是 Claude Code 的技能包，以智能高效的方式帮助你对 K8s 集群执行监控、故障排除和审计任务。没有 kstack 时，代理与集群交互时通常直接调用 `kubectl`，这存在以下缺点：
+
+- 宽泛查询（`kubectl get pods -A -o yaml`）会将大块 YAML 拉入代理上下文，消耗大量 token，并将攻击者可控的字符串（注解、事件消息、日志行）与指令混入同一上下文。
+- 代理不具备确定性，因此"我的集群健康吗？"这类问题的回答在每次运行之间可能不同。
+- 宿主代理的权限提示仅停留在 shell 层面，可以在命令执行前询问，但无法区分 `kubectl get pods` 和 `kubectl delete namespace`。
+
+Kstack 用一组固定的技能取代了这些任务中对 `kubectl` 的直接调用。技能通过脚本为每个任务收集数据，并将批量结果缓存到磁盘，向代理返回摘要。这使代理对响应拥有更细粒度的控制，更安全、更节省 token，同时也让代理能够更快地回答后续问题。
+
+---
+
+## 技能
+
+**监控**
+* [`/cluster-status`](/zh-cn/reference/skills/cluster-status) — 健康快照（Pod 重启、节点状态、资源压力）
+* [`/events`](/zh-cn/reference/skills/events) — 最近事件，按严重性排序
+
+**故障排除**
+* [`/investigate <resource>`](/zh-cn/reference/skills/investigate) — 跨事件、日志和相关资源的根因分析
+* [`/logs`](/zh-cn/reference/skills/logs) — 共享 tmux 会话，将自然语言转换为日志抓取和分析（通过 [Kubetail](https://github.com/kubetail-org/kubetail)）
+* [`/metrics`](/zh-cn/reference/skills/metrics) — 获取 Pod、节点和工作负载的 CPU、内存及其他资源指标
+* [`/exec <pod>`](/zh-cn/reference/skills/exec) — 进入 Pod、节点或临时调试容器的共享 tmux shell
+
+**审计**
+* [`/audit-security`](/zh-cn/reference/skills/audit-security) — RBAC、Pod 安全态势、权限收紧建议
+* [`/audit-network`](/zh-cn/reference/skills/audit-network) — NetworkPolicy、Service、Ingress、GatewayAPI、DNS 和加密检查
+* [`/audit-cost`](/zh-cn/reference/skills/audit-cost) — 请求量与使用量对比、过度配置、空闲容量
+* [`/audit-outdated`](/zh-cn/reference/skills/audit-outdated) — 过时服务、已知 CVE、可用版本升级
+
+**其他**
+* [`/cleanup`](/zh-cn/reference/skills/cleanup) — 从集群中移除所有 kstack 拥有的资源（调试容器、Pod 克隆、watcher Job）
+* [`/forget`](/zh-cn/reference/skills/forget) — 清除 kstack 的本地缓存，丢弃其对集群的学习数据
+
+---
+
+## 支持的代理
+
+技能由纯 Markdown 文件和配套 shell 脚本组成。引导脚本（[https://kstack.sh/install](https://kstack.sh/install)）会检测 `PATH` 中每个受支持的代理并安装到其中：Claude Code、OpenAI Codex CLI、OpenCode、Cursor、Factory Droid、Slate、Kiro、Hermes。各代理的行为完全一致，仅安装路径不同。

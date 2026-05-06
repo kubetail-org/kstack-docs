@@ -1,0 +1,81 @@
+---
+title: /audit-network
+description: 'NetworkPolicy, 서비스, 인그레스, GatewayAPI, DNS 및 암호화 상태 검사.'
+---
+
+`/audit-network` 스킬은 클러스터 네트워킹에서 손상되거나 누락된 부분을 찾습니다: 아무것도 매칭하지 않는 `NetworkPolicy` 인스턴스, 엔드포인트가 없는 `Service` 인스턴스, 해석되지 않는 `Ingress` 및 `GatewayAPI` 라우트, DNS 문제, 그리고 서비스 메시가 사용 가능할 때 평문으로 통신하는 워크로드.
+
+인수 없이 실행하면 전체 스윕을 수행하거나, 워크플로 이름을 지정하여 보고서 범위를 좁힐 수 있습니다.
+
+```text
+/audit-network                         # full sweep
+/audit-network policies                # single workflow
+/audit-network ingress in prod
+```
+
+모든 워크플로에서 자연어 범위 지정(네임스페이스, 레이블 셀렉터, 워크로드 이름)이 지원됩니다([개요](/ko/reference/skills/overview/) 참조).
+
+---
+
+## 워크플로
+
+### 1. NetworkPolicy
+
+:::note[검사 항목]
+- 기본 거부 정책이 없는 네임스페이스와 정책이 전혀 적용되지 않는 파드
+- `podSelector` 또는 피어 셀렉터가 어떤 파드 또는 네임스페이스와도 매칭되지 않는 정책
+- 대상 파드가 노출하지 않는 포트 또는 프로토콜을 참조하는 규칙
+:::
+
+출처: Kubernetes API.
+
+### 2. Service
+
+:::note[검사 항목]
+- 준비된 엔드포인트가 0인 서비스
+- `selector` / 파드 레이블 불일치 및 `port` / `targetPort` 불일치
+- StatefulSet를 지원하지 않는 헤드리스 서비스 (`clusterIP: None`)
+:::
+
+출처: Kubernetes API.
+
+### 3. 인그레스 & GatewayAPI
+
+:::note[검사 항목]
+- 인그레스 또는 Gateway 라우트 전반의 호스트명 충돌
+- 누락되거나 만료된 시크릿을 참조하는 TLS 항목
+- 존재하지 않거나 엔드포인트가 없는 서비스를 가리키는 백엔드
+:::
+
+출처: Kubernetes API (CRD가 설치된 경우 `gateway.networking.k8s.io` 포함).
+
+### 4. DNS
+
+:::note[검사 항목]
+- CoreDNS 파드 상태 및 최근 재시작
+- CoreDNS 메트릭에서 NXDOMAIN 또는 SERVFAIL 비율 상승
+- 해석되지 않는 CoreDNS 컨피그맵의 스텁 도메인 및 포워더
+:::
+
+출처: CoreDNS `Deployment`, `ConfigMap`, 그리고 노출된 경우 Prometheus 메트릭.
+
+### 5. 암호화 및 mTLS
+
+:::note[검사 항목]
+- 서비스 메시의 사이드카 또는 앰비언트 커버리지 외부의 워크로드
+- 허용 모드(평문 허용) mTLS로 설정된 네임스페이스 또는 워크로드
+:::
+
+출처: Istio, Linkerd, 또는 Cilium CRD — 해당 서비스 메시 중 하나가 감지된 경우에만 실행됩니다.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+워크플로 외에도 스킬은 에이전트에게 범위 지정 및 보고 방법을 안내합니다:
+
+- 관련 CRD가 설치되어 있지 않으면 서비스 메시 및 GatewayAPI 워크플로를 건너뜁니다 — 부재는 결과가 아닙니다.
+- TLS 검사에서 잘못된 "만료됨"을 보고하는 대신 RBAC로 인해 시크릿 내용을 읽을 수 없는 경우를 명시합니다.
+- DNS 활성 프로브 검사에서 오류를 해석할 수 있도록 프로브 출처(해석에 사용된 클러스터 내 파드)를 명시합니다.
+- 결과를 워크플로별로 그룹화하고 판정만이 아닌 증거(셀렉터, 엔드포인트, 컨피그맵 키)를 포함합니다.
+- CoreDNS 로그는 [`/logs`](/ko/reference/skills/logs/)로, 단일 워크로드가 근본 원인인 경우 [`/investigate`](/ko/reference/skills/investigate/)로 전달합니다.

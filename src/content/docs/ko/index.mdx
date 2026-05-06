@@ -1,0 +1,87 @@
+---
+title: kstack
+description: 'kstack은 Claude Code용 스킬 팩으로, K8s 클러스터에서 모니터링, 문제 해결, 감사 작업을 스마트하고 효율적으로 수행할 수 있도록 도와줍니다.'
+template: doc
+head:
+  - tag: title
+    content: 'kstack - Kubernetes 클러스터 모니터링, 문제 해결, 감사를 위한 AI 스킬 팩'
+hero:
+  tagline: 'K8s 클러스터를 초지능 수준으로 모니터링하는 Claude Code용 스킬 팩.'
+  image:
+    file: ../../../assets/logo-icon.svg
+  actions:
+    - text: View Source
+      link: https://github.com/kubetail-org/kstack
+      icon: github
+    - text: Join Discord
+      link: https://discord.gg/CmsmWAVkvX
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+---
+
+## 빠른 시작
+
+kstack 스킬을 글로벌로 설치하려면 다음 명령을 실행하십시오:
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+특정 프로젝트 디렉토리 내에 로컬로 설치할 수도 있습니다:
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+설치 후 에이전트 세션에서 스킬을 사용할 수 있습니다:
+
+```
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+기본적으로 스크립트는 `kstack-*` 네임스페이스 접두사를 붙여 스킬을 설치하지만 `--no-prefix` 플래그로 비활성화할 수 있습니다. 또한 사용 가능한 모든 에이전트(예: Claude, Codex, OpenCode)에 스킬을 설치하지만, `--agent` 플래그로 특정 에이전트를 지정할 수 있습니다([설치](/ko/tutorials/installation) 참조).
+
+kstack은 인증에 로컬 `kubeconfig` 파일을 사용하며 RBAC 권한을 준수합니다. 권한 문제가 발생하면 알려줍니다.
+
+---
+
+## 스킬
+
+**모니터링**
+* [`/cluster-status`](/ko/reference/skills/cluster-status) — 상태 스냅샷 (파드 재시작, 노드 상태, 리소스 압박)
+* [`/events`](/ko/reference/skills/events) — 최근 이벤트, 심각도 순 정렬
+
+**문제 해결**
+* [`/investigate`](/ko/reference/skills/investigate) — 이벤트, 로그, 관련 리소스 전반의 근본 원인 분석
+* [`/logs`](/ko/reference/skills/logs) — 자연어를 로그 조회 및 분석으로 변환하는 공유 tmux 세션 ([Kubetail](https://github.com/kubetail-org/kubetail) 활용)
+* [`/metrics`](/ko/reference/skills/metrics) — 파드, 노드, 워크로드의 CPU, 메모리 및 기타 리소스 메트릭 조회
+* [`/exec`](/ko/reference/skills/exec) — 파드, 노드, 또는 임시 디버그 컨테이너로의 공유 tmux 셸
+
+**감사**
+* [`/audit-security`](/ko/reference/skills/audit-security) — RBAC, 파드 보안 포스처, 권한 축소
+* [`/audit-network`](/ko/reference/skills/audit-network) — NetworkPolicy, 서비스, 인그레스, GatewayAPI, DNS 및 암호화 검사
+* [`/audit-cost`](/ko/reference/skills/audit-cost) — 요청 대비 사용량, 과잉 프로비저닝, 유휴 용량
+* [`/audit-outdated`](/ko/reference/skills/audit-outdated) — 오래된 서비스, 알려진 CVE, 사용 가능한 버전 업그레이드
+
+**기타**
+* [`/cleanup`](/ko/reference/skills/cleanup) — 클러스터에서 kstack이 소유한 모든 리소스 제거 (디버그 컨테이너, 파드 복제본, watcher Job)
+* [`/forget`](/ko/reference/skills/forget) — kstack의 로컬 캐시를 지우고 클러스터에 대해 학습한 내용 삭제
+
+---
+
+## 다음 단계
+
+<CardGrid>
+	<Card title="소개" icon="open-book">
+		kstack이 무엇인지, 어떻게 작동하는지, 어떤 문제를 해결하는지 알아보십시오. [소개 읽기](/ko/concepts/introduction).
+	</Card>
+	<Card title="스킬" icon="rocket">
+		클러스터 모니터링, 문제 해결, 감사를 위한 전체 스킬 레퍼런스를 탐색하십시오. [스킬 보기](/ko/reference/skills/overview).
+	</Card>
+</CardGrid>

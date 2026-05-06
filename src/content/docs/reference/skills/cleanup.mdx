@@ -1,0 +1,34 @@
+---
+title: /cleanup
+description: Remove all kstack-managed resources from the cluster.
+---
+
+The `/cleanup` skill removes every resource kstack has created in the cluster. This skill is the counterpart to [`/forget`](/reference/skills/forget/), which clears local state.
+
+```text
+/cleanup                      # clean up the current context
+```
+
+:::note[User-invoked only]
+`/cleanup` ships with `disable-model-invocation: true`. The agent will never start a cleanup on its own — it only runs when you explicitly type `/cleanup`, since it deletes cluster resources.
+:::
+
+---
+
+## What it removes
+
+Everything kstack creates in the cluster is annotated with `kstack.kubetail.com/owned-by=kstack`. The skill instructs the agent to find those resources and delete them. In practice that covers the things other skills leave behind — ephemeral debug containers, privileged node-shell pods, short-lived toolbox pods from [`/exec`](/reference/skills/exec/), and any temporary RBAC or ConfigMaps created to support them. The agent is instructed to leave anything without the annotation untouched.
+
+---
+
+## How it works
+
+Before deleting anything, the agent is instructed to list what it found and asks you to confirm. Resources are grouped by namespace and kind so you can see at a glance what's about to go. You can approve the whole set or tell the agent to skip specific items in natural language.
+
+If a delete fails — usually a finalizer or a permissions issue — the agent reports which resources remain and why, rather than retrying blindly.
+
+---
+
+## Options
+
+Global flags from [Overview](/reference/skills/overview/) apply.

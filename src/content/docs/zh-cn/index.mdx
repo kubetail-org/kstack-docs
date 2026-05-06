@@ -1,0 +1,87 @@
+---
+title: kstack
+description: Kstack 是 Claude Code 的技能包，以智能高效的方式帮助你对 K8s 集群执行监控、故障排除和审计任务。
+template: doc
+head:
+  - tag: title
+    content: kstack - AI 技能包，用于监控、故障排除和审计 Kubernetes 集群
+hero:
+  tagline: Claude Code 的技能包，帮助你以超智能的方式监控 K8s 集群。
+  image:
+    file: ../../../assets/logo-icon.svg
+  actions:
+    - text: 查看源码
+      link: https://github.com/kubetail-org/kstack
+      icon: github
+    - text: 加入 Discord
+      link: https://discord.gg/CmsmWAVkvX
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+---
+
+## 快速开始
+
+全局安装 kstack 技能，运行以下命令：
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+也可以在特定项目目录中本地安装：
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+安装完成后，技能将在代理会话中可用：
+
+```
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+默认情况下，脚本会以 `kstack-*` 命名空间前缀安装技能，可使用 `--no-prefix` 标志禁用此行为。脚本还会为所有可用代理安装技能（如 Claude、Codex、OpenCode），也可使用 `--agent` 标志指定单个代理（参见[安装](/zh-cn/tutorials/installation)）。
+
+Kstack 使用本地 `kubeconfig` 文件进行身份验证，并遵守你的 RBAC 权限。若遇到权限问题，kstack 会予以提示。
+
+---
+
+## 技能
+
+**监控**
+* [`/cluster-status`](/zh-cn/reference/skills/cluster-status) — 健康快照（Pod 重启、节点状态、资源压力）
+* [`/events`](/zh-cn/reference/skills/events) — 最近事件，按严重性排序
+
+**故障排除**
+* [`/investigate`](/zh-cn/reference/skills/investigate) — 跨事件、日志和相关资源的根因分析
+* [`/logs`](/zh-cn/reference/skills/logs) — 共享 tmux 会话，将自然语言转换为日志抓取和分析（通过 [Kubetail](https://github.com/kubetail-org/kubetail)）
+* [`/metrics`](/zh-cn/reference/skills/metrics) — 获取 Pod、节点和工作负载的 CPU、内存及其他资源指标
+* [`/exec`](/zh-cn/reference/skills/exec) — 进入 Pod、节点或临时调试容器的共享 tmux shell
+
+**审计**
+* [`/audit-security`](/zh-cn/reference/skills/audit-security) — RBAC、Pod 安全态势、权限收紧建议
+* [`/audit-network`](/zh-cn/reference/skills/audit-network) — NetworkPolicy、Service、Ingress、GatewayAPI、DNS 和加密检查
+* [`/audit-cost`](/zh-cn/reference/skills/audit-cost) — 请求量与使用量对比、过度配置、空闲容量
+* [`/audit-outdated`](/zh-cn/reference/skills/audit-outdated) — 过时服务、已知 CVE、可用版本升级
+
+**其他**
+* [`/cleanup`](/zh-cn/reference/skills/cleanup) — 从集群中移除所有 kstack 拥有的资源（调试容器、Pod 克隆、watcher Job）
+* [`/forget`](/zh-cn/reference/skills/forget) — 清除 kstack 的本地缓存，丢弃其对集群的学习数据
+
+---
+
+## 下一步
+
+<CardGrid>
+	<Card title="简介" icon="open-book">
+		了解 kstack 是什么、如何工作以及它解决的问题。[阅读简介](/zh-cn/concepts/introduction)。
+	</Card>
+	<Card title="技能" icon="rocket">
+		浏览完整的技能参考，涵盖集群监控、故障排除和审计。[查看技能](/zh-cn/reference/skills/overview)。
+	</Card>
+</CardGrid>

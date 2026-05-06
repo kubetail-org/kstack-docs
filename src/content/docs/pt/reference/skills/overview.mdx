@@ -1,0 +1,44 @@
+---
+title: Visão geral
+description: Convenções comuns a todas os Skills do kstack — argumentos em linguagem natural e sinalizadores globais.
+---
+
+Esta página descreve o que é comum a todas os Skills.
+
+## Argumentos em linguagem natural
+
+A menos que a página de um Skill indique o contrário, qualquer coisa que você digitar após o nome do Skill é passada ao agent como instrução de forma livre. Não é preciso memorizar uma sintaxe; apenas descreva o que você quer.
+
+```text
+> /cluster-status only pods
+> /investigate backend server keeps crashing
+> /logs errors from the last hour on api pods
+> /audit-outdated container images in kube-system
+```
+
+O agent resolve a intenção, escolhe os recursos certos e restringe o escopo adequadamente. Sinalizadores (abaixo) também funcionam se você preferir ser explícito — combine livremente.
+
+## Contexto K8s
+
+Por padrão, os Skills usarão o contexto padrão do seu `kubeconfig`, a menos que você indique o contrário. Você pode usar linguagem natural para mudar de contexto e o kstack lembrará sua escolha pelo restante da sessão:
+
+```text
+> /cluster-status
+[ ... ]
+> redo with prod
+[ ... ]
+```
+
+## Sinalizadores globais
+
+Estes sinalizadores são suportados por todas os Skills:
+
+<dl>
+  <dt>`--context <ctx>`</dt>
+  <dd>Sobrescreve o contexto kubeconfig atual</dd>
+
+  <dt>`--help`</dt>
+  <dd>Abre a página de documentação de referência do Skill no seu navegador</dd>
+</dl>
+
+Mais sinalizadores serão adicionados aqui com o tempo. Quando a página de um Skill individual documenta seus próprios sinalizadores, assuma que os sinalizadores globais também estão disponíveis.

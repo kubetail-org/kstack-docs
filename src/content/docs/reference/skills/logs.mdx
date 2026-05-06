@@ -1,0 +1,74 @@
+---
+title: /logs
+description: Fetch and filter container logs via Kubetail's node-side grep — streamed into a tmux pane shared with the agent.
+---
+
+The `/logs` skill is an AI-powered log fetcher. You can use the skill to describe what you're looking for and the agent will find the right pods, pick the appropriate time window, and use the best grep filter to fetch only the lines that matter.
+
+To fetch logs efficiently, this skill teaches the agent how to use [Kubetail](https://github.com/kubetail-org/kubetail), which uses a Rust-powered cluster agent (a classic K8s agent, not an AI agent) running on each node to perform filtering remotely instead of locally. That makes it practical to search across many pods and long time windows quickly without sending gigabytes of data back first.
+
+The stream runs inside a **tmux** window that both you and the agent are attached to simultaneously. The agent reads from the pane to answer your question and you can scroll, search, or keep watching the live tail in real time.
+
+```text
+/logs                                     # prompts for a target
+/logs api                                 # recent logs from the api workload
+/logs errors from the last hour on api    # natural-language scoping
+/logs checkout for "timeout" in last 15m
+```
+
+Natural-language scoping (namespaces, label selectors, workload names, time windows, grep patterns) is supported (see [Overview](/reference/skills/overview/)). The agent translates your description into the appropriate Kubetail query.
+
+:::caution[Security]
+Container logs frequently contain sensitive data — secrets, tokens, request bodies, PII. Anything visible in the pane is read by the agent and may be sent to the model. Scope queries narrowly (specific workload, short time window, targeted grep) and prefer redaction at the source over relying on filtering after the fact. See [Security](/concepts/security/) for the full trust model.
+:::
+
+---
+
+## Requirements
+
+- `tmux` must be available in the agent's `$PATH`. The skill will not run without it.
+- Kubetail must be installed in the cluster. If it isn't, the skill will offer to install it for you using Kubetail's Helm chart (see the [install guide](https://docs.kubetail.com/guides/cluster/installation) for the manual path).
+
+---
+
+## How the agent opens a logging session
+
+Once the agent has resolved the target and built the Kubetail query, it:
+
+1. Starts a detached tmux session with a descriptive name (e.g. `kstack-logs-api-server`).
+2. Tries to open a new terminal window on your desktop and attach it to that session — so the stream just appears in front of you.
+3. Prints the exact `tmux attach` command in chat, so you can connect manually from any terminal (useful over SSH, in a remote editor, or if the window spawn fails).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-logs-api-server
+```
+
+You and the agent share the same pane. The agent reads from the window conservatively to save tokens, so you may have to prod it to catch up on the latest output. Tell the agent to tear down the session and it will stop the underlying tail and kill the tmux session.
+
+---
+
+## What the agent is told
+
+Beyond opening the stream, the skill briefs the agent on how to behave:
+
+- Translate the user's description into the narrowest viable Kubetail query — specific workload, short time window, targeted grep — and show the resolved query so the user can narrow further before the stream starts.
+- Read from the tmux pane conservatively to save tokens; prod the user to scroll rather than re-reading large buffers unprompted.
+- Treat log content as potentially sensitive — don't echo lines that look like tokens, request bodies, or PII back into chat unless the user explicitly asks.
+- Hand off to [`/investigate`](/reference/skills/investigate/) when the user wants root-cause context around the logs, or [`/metrics`](/reference/skills/metrics/) when a log pattern correlates with a resource spike.
+- When the user signals they're done, stop the tail and kill the tmux session.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--attach`</dt>
+  <dd>Attach the agent to an existing kstack tmux session instead of starting a new one.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Start a new session in the detached state — no terminal window is opened, attach manually.</dd>
+</dl>
+
+Global flags from [Overview](/reference/skills/overview/) also apply.

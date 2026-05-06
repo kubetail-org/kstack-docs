@@ -1,0 +1,112 @@
+---
+title: /cluster-status
+description: 集群的高密度健康快照 — 节点状态、Pod 汇总，以及按严重性排序的问题列表。
+---
+
+`/cluster-status` 技能生成集群的单一高密度健康快照：集群基本信息、节点和 Pod 的健康数量，以及一份简短的异常排名列表。该技能只读，永远不会改变集群状态。
+
+输出刻意控制在较小范围（无论集群规模，约 10 行），使首次响应的阅读成本和模型处理成本都很低。完整的逐节点和逐 Pod 详情写入本地 JSON 缓存，代理在后续问题中直接从缓存读取，无需重复调用 API。
+
+```text
+/cluster-status                    # snapshot (uses cache if fresh)
+/cluster-status --refresh          # force a fresh fetch
+/cluster-status --ttl 1h           # only re-fetch if older than 1h
+```
+
+该技能不接受位置参数。后续问题（"列出 Pod"、"哪些节点有污点"、"worker-3 上的 Pod"）从缓存中回答 — 参见下方[后续问题](#后续问题)。
+
+---
+
+## 收集内容
+
+:::note[初始数据包]
+- **集群元数据**（`cluster.json`）— 上下文名称、Kubernetes 版本和平台（EKS、GKE、kind 等），来自 `kubectl version` 和 `kubectl cluster-info`。
+- **节点列表**（`nodes.json`）— 每个节点的标签、污点、状态（`Ready`、`MemoryPressure`、`DiskPressure`、`PIDPressure`、`SchedulingDisabled`）、容量、可分配量，以及控制平面/工作节点角色。
+- **Pod 列表**（`pods.json`）— 所有命名空间中的每个 Pod，包含阶段、`Ready` 状态、容器状态、重启次数、Owner Reference 以及所在节点。
+:::
+
+数据来源：仅 Kubernetes API — `kubectl version`、`kubectl get nodes -o json`、`kubectl get pods -A -o json`，并行执行。三个文件写入每个上下文对应的缓存目录，在 TTL 时间窗口内的后续查询中复用。
+
+---
+
+## 检查内容
+
+:::note[检查]
+- 集群标识 — 上下文名称、Kubernetes 版本和平台（EKS、GKE、kind 等）
+- 节点 `Ready` 状态、`MemoryPressure`/`DiskPressure`/`PIDPressure` 等 condition、`SchedulingDisabled`，以及控制平面/工作节点分布
+- 所有命名空间中 Pod 的阶段和 `Ready` 状态，以及重启次数非零的 Pod
+- 按严重性排序的 Top 5 问题列表（集群问题较多时显示"…还有 N 个"尾注）
+:::
+
+数据来源：仅 Kubernetes API — `kubectl version`、`kubectl get nodes`、`kubectl get pods -A`，并行执行。
+
+---
+
+## 工作方式
+
+技能并行获取三个列表，并分别写入每个上下文缓存目录的 `cluster.json`、`nodes.json` 和 `pods.json`。聚合和严重性排序在客户端对 JSON 进行，因此在 TTL 时间窗口内重复运行可完全跳过 API。
+
+摘要格式如下：
+
+```text
+Cluster: prod-us-east · Kubernetes v1.30.4 · EKS
+
+Nodes  12/12 Ready · 1 pressure · 0 unschedulable · 3 control-plane, 9 worker
+Pods   184/187 Ready · 4 pod(s) with restarts
+
+Issues (6):
+  payments/checkout-7c9  CrashLoopBackOff  17 restarts in 42m
+  ingress/nginx-0        MemoryPressure    node ip-10-0-3-14
+  ...                                      (top 5 by severity)
+  …and 1 more
+
+Snapshot cached (TTL 15m). Ask to drill in — e.g. "list nodes", "list pods", "pods on <node>", "which nodes are tainted".
+```
+
+集群无异常时省略 `Issues` 块。页脚说明快照是新获取的还是来自缓存，以及缓存数据的时效。
+
+---
+
+## 后续问题
+
+摘要刻意省略了逐节点和逐 Pod 详情表，以保持首次响应的简洁。当你要求查看详情，或询问任何可从三个缓存 JSON 文件中回答的问题时，代理使用 `jq` 读取缓存，而非重新运行技能：
+
+```text
+❯ /cluster-status
+[ summary... ]
+
+❯ list pods
+[ full pod table, rendered from pods.json ]
+
+❯ which pods are on ip-10-0-3-14?
+[ filtered from pods.json ]
+```
+
+对于缓存中没有的数据（事件、日志、特定资源的 YAML），代理路由到对应技能 — [`/events`](/zh-cn/reference/skills/events/)、[`/logs`](/zh-cn/reference/skills/logs/) 或 [`/investigate`](/zh-cn/reference/skills/investigate/) — 而非扩展 `/cluster-status` 的范围。
+
+说"刷新"/"重新获取"/"重新检查"，代理将使用 `--refresh` 重新调用技能。
+
+---
+
+## 代理收到的指引
+
+除获取三个列表外，技能还向代理说明如何处理后续问题：
+
+- 优先使用 `jq` 从缓存的 `cluster.json` / `nodes.json` / `pods.json` 回答，而非重新调用技能 — 缓存正是摘要保持简短的意义所在。
+- 仅在用户明确要求，或后续问题明显对时效性敏感（"节点恢复了吗？"）时，才使用 `--refresh` 重新调用。
+- 保持摘要简短 — 详情请求（完整表格、逐节点深入）路由到缓存读取，而非扩充摘要块。
+- 对于不在三个缓存文件中的任何内容，转交给 [`/events`](/zh-cn/reference/skills/events/)、[`/logs`](/zh-cn/reference/skills/logs/) 或 [`/investigate`](/zh-cn/reference/skills/investigate/)，而非扩大该技能范围。
+
+---
+
+## 选项
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>绕过缓存，从 API 获取最新数据。</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>仅当缓存快照早于该值时才重新获取（kubectl 风格：<code>5m</code>、<code>1h</code>、<code>24h</code>）。默认值：<code>15m</code>。设置 <code>--refresh</code> 时忽略。</dd>
+</dl>
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

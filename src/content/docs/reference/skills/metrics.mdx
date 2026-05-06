@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: Fetch CPU, memory, and other resource metrics for pods, nodes, and workloads — via natural language, read-only.
+---
+
+The `/metrics` skill is an AI-powered metrics fetcher. Describe what you want to see and the agent resolves the right target, picks a sensible time window, and returns a compact summary. It is read-only and never mutates cluster state.
+
+When the `/metrics` skill is invoked, the agent is instructed to query the `metrics-server` for live data and Prometheus for history. If it needs a tool that isn't available, the agent will offer to install it for you. It is also given guidelines on how to display data so that output is bounded and efficient to run through the model.
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+Natural-language scoping (namespaces, label selectors, workload names, time windows, metric names) is supported (see [Overview](/reference/skills/overview/)). The agent translates your description into the appropriate query against whichever source is available.
+
+---
+
+## Data sources
+
+Sources, in order of preference based on the query:
+
+- **`metrics-server`** — used for live snapshots via `kubectl top`. If Prometheus isn't available, the skill falls back to this for any query, and flags in the output that the answer is a point-in-time sample rather than a window.
+- **Prometheus** — used when the agent detects an in-cluster Prometheus and the question has a time window. Queried via its in-cluster service over PromQL.
+
+The skill never scrapes exporters directly, and doesn't reads metrics endpoints from outside the cluster (e.g. DataDog, Graphana Cloud).
+
+---
+
+## What the agent is told
+
+Beyond instructing the agent on where to fetch data from, the skill briefs the agent on how to behave:
+
+- Prefer Prometheus over `metrics-server` whenever the question has a time window; fall back to `metrics-server` for live snapshots but label the output `source: metrics-server` so the reader isn't misled about windowing.
+- Report summary statistics (p50, p95, max) rather than piping the full series through the model.
+- If the resolved query covers many more pods or a wider window than the user likely intended, show the resolved query and ask before running it.
+- Call out label sets that embed tenant IDs, user IDs, or path segments as potentially sensitive; don't echo those labels back into chat unless the user explicitly asks.
+- Route off this skill per the [Handoffs](#handoffs) section below rather than widening it into a general observability tool.
+
+---
+
+## Safety
+
+`/metrics` is read-only. It issues `kubectl top` and Prometheus range queries against the target you described, and nothing else — no exec, no writes, no access to pod contents or logs. If the description resolves to more pods or a wider window than you likely intended, the agent will show you the resolved query and ask before running it.
+
+Metric values themselves rarely contain sensitive data, but label sets can — a custom metric name or label that embeds a tenant ID, user ID, or path segment ends up in the agent's context the same way log lines do. Scope queries to the workload you care about rather than broad wildcards. See [Security](/concepts/security/) for the full trust model.
+
+---
+
+## Handoffs
+
+For anything outside resource usage, the agent routes to a neighboring skill rather than widening `/metrics`:
+
+- [`/logs`](/reference/skills/logs/) when you want to see *why* a pod's CPU or memory moved
+- [`/investigate`](/reference/skills/investigate/) when usage is a symptom of a failing resource and you want root-cause context
+- [`/audit-cost`](/reference/skills/audit-cost/) for a full right-sizing sweep rather than a one-off check
+
+---
+
+## Options
+
+`/metrics` takes no skill-specific flags in the MVP. Scope the target, metric, and time window via natural language in the prompt or in a follow-up.
+
+Global flags from [Overview](/reference/skills/overview/) apply.

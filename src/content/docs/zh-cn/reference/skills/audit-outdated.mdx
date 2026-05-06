@@ -1,0 +1,106 @@
+---
+title: /audit-outdated
+description: 过时的集群组件、已知 CVE 和可用版本升级。
+---
+
+`/audit-outdated` 技能用于检测集群每一层的版本漂移：控制平面、节点、容器镜像、Helm Chart、CRD、Operator，以及 manifest 所针对的 API 版本。每一层都有各自的"最新版"定义和漂移容忍度。
+
+不带参数运行可进行全面扫描，也可指定工作流名称以限定报告范围。
+
+```text
+/audit-outdated            # full sweep
+/audit-outdated images     # single workflow
+/audit-outdated cves in kube-system
+```
+
+每个工作流均支持自然语言范围限定（命名空间、标签选择器、严重性阈值），参见[概述](/zh-cn/reference/skills/overview/)。
+
+---
+
+## 工作流
+
+### 1. Kubernetes 版本偏差
+
+:::note[检查]
+- 控制平面次要版本与该次要版本最新补丁版本的差距
+- 各节点 `kubelet` 版本与控制平面次要版本的差距
+- 距上游 Kubernetes 支持矩阵中 EOL 的版本距离
+:::
+
+数据来源：已发布的 [Kubernetes 发布时间表](https://kubernetes.io/releases/)。
+
+### 2. 已弃用和已移除的 API 版本
+
+:::note[检查]
+- 正在使用当前次要版本中已弃用或下一次要版本中将被移除的 API 版本的活动对象
+- 针对已弃用 `apiextensions.k8s.io` 版本注册的 Admission Webhook 和 CRD
+:::
+
+数据来源：[`pluto`](https://github.com/FairwindsOps/pluto) 和 [`kubent`](https://github.com/doitintl/kube-no-trouble)（若可用），以及已发布的 [Kubernetes API 弃用时间表](https://kubernetes.io/docs/reference/using-api/deprecation-guide/)作为回退。
+
+### 3. 容器镜像新鲜度
+
+:::note[检查]
+- 标签固定版本低于源镜像仓库中最高可用 semver 的镜像
+- 浮动标签（`:latest`、无版本），单独报告，因为"过时"在此场景下无明确定义
+- 摘要漂移 — 相同标签，上游有更新的摘要
+- 附有 SBOM 时的基础镜像时效
+:::
+
+数据来源：Docker Hub、GHCR、quay.io 和 gcr.io。目前不支持私有镜像仓库。
+
+### 4. Helm Chart 和 Release
+
+:::note[检查]
+- 已安装 Chart 版本与配置仓库中最新版本的差距
+- `Chart.yaml` 中声明的子 Chart 依赖版本与上游版本的差距
+- 在上游标记为 `deprecated: true` 的 Chart
+:::
+
+数据来源：已配置的 Helm 仓库索引。OCI 托管的 Chart 直接从 OCI 镜像仓库读取。
+
+### 5. Operator、CRD 及其控制器
+
+:::note[检查]
+- Operator 版本与上游发布版本的差距
+- 映射到过时控制器的 CRD
+:::
+
+数据来源：复用工作流 3 和 4 的镜像仓库和 Helm 仓库数据。
+
+### 6. 已知漏洞
+
+:::note[检查]
+- 运行中容器镜像中的 CVE
+- Kubernetes 版本本身中的 CVE
+:::
+
+数据来源：[Trivy](https://github.com/aquasecurity/trivy) 和[官方 Kubernetes CVE Feed](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/)。
+
+### 7. 节点 OS 和内核
+
+:::note[检查]
+- 节点 OS 镜像与发行版当前版本的差距（如 Ubuntu、Amazon Linux）
+- 内核版本与已发布 CVE 的对比
+:::
+
+数据来源：发行版 Release Feed（用于最新 OS 和内核版本），以及 [CISA KEV 目录](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)（用于标记被积极利用的内核 CVE）。
+
+---
+
+## 数据时效性
+
+每份报告都包含"数据时效"页脚，注明各索引（Trivy DB、Helm 仓库、镜像仓库标签列表、Kubernetes 发布时间表）的最后刷新时间。
+
+---
+
+## 代理收到的指引
+
+除工作流外，技能还向代理说明如何报告：
+
+- 始终包含数据时效页脚 — 过时的索引会产生过时的发现，读者需要知道。
+- 按镜像摘要去重，确保多个 Pod 共享同一过时镜像时不会在报告中重复出现。
+- CVE 条目包含严重性和 CISA KEV 状态（若可用）；在无已知利用的 CVSS 高评级发现之上优先排列 KEV 命中。
+- 明确区分"在支持时间窗口内的漂移"和"EOL" — 前者属于常规维护，后者属于紧急情况。
+- 对于不在支持列表中的镜像仓库（工作流 3），直接说明而非静默跳过。
+- 当单个工作负载的过时镜像成为焦点时，转交给 [`/investigate`](/zh-cn/reference/skills/investigate/)。

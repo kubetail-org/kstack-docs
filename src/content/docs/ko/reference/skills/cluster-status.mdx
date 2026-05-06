@@ -1,0 +1,112 @@
+---
+title: /cluster-status
+description: '클러스터의 밀도 있는 상태 스냅샷 — 노드 상태, 파드 집계, 실제로 중요한 문제의 순위 목록.'
+---
+
+`/cluster-status` 스킬은 클러스터의 단일 밀도 있는 상태 스냅샷을 생성합니다: 일반 클러스터 정보, 정상 노드 및 파드 수, 그리고 그렇지 않은 항목의 간단한 순위 목록. 읽기 전용이며 클러스터 상태를 변경하지 않습니다.
+
+출력은 의도적으로 제한되어(클러스터 크기에 관계없이 약 10줄), 첫 번째 응답은 읽기 쉽고 모델을 통해 재방출하는 데도 비용이 낮습니다. 전체 노드별 및 파드별 세부 정보는 로컬 JSON 캐시에 기록되며 에이전트는 API를 다시 호출하지 않고 후속 질문에서 이를 읽습니다.
+
+```text
+/cluster-status                    # snapshot (uses cache if fresh)
+/cluster-status --refresh          # force a fresh fetch
+/cluster-status --ttl 1h           # only re-fetch if older than 1h
+```
+
+이 스킬은 위치 인수를 사용하지 않습니다. 후속 질문("파드 목록", "테인트된 노드", "worker-3의 파드")은 캐시에서 답변됩니다 — 아래 [후속 질문](#후속-질문)을 참조하십시오.
+
+---
+
+## 수집되는 내용
+
+:::note[초기 번들]
+- **클러스터 메타데이터** (`cluster.json`) — `kubectl version` 및 `kubectl cluster-info`에서 가져온 컨텍스트 이름, Kubernetes 버전, 플랫폼 (EKS, GKE, kind 등).
+- **노드 목록** (`nodes.json`) — 모든 노드의 레이블, 테인트, 상태 (`Ready`, `MemoryPressure`, `DiskPressure`, `PIDPressure`, `SchedulingDisabled`), 용량, 할당 가능량, 컨트롤 플레인 대 워커 역할.
+- **파드 목록** (`pods.json`) — 모든 네임스페이스의 모든 파드, 단계, `Ready` 상태, 컨테이너 상태, 재시작 횟수, 소유자 참조, 그리고 각 파드가 스케줄된 노드 포함.
+:::
+
+출처: Kubernetes API 전용 — `kubectl version`, `kubectl get nodes -o json`, `kubectl get pods -A -o json`를 병렬로 팬아웃. 세 파일은 컨텍스트별 캐시 디렉토리에 기록되며 TTL 기간 내 후속 작업에서 재사용됩니다.
+
+---
+
+## 검사 항목
+
+:::note[검사 항목]
+- 클러스터 ID — 컨텍스트 이름, Kubernetes 버전, 플랫폼 (EKS, GKE, kind 등)
+- 노드 `Ready` 상태, `MemoryPressure` / `DiskPressure` / `PIDPressure` 상태, `SchedulingDisabled`, 컨트롤 플레인 대 워커 분할
+- 모든 네임스페이스의 파드 단계 및 `Ready` 상태, 그리고 재시작 횟수가 0이 아닌 파드
+- 순위가 매겨진 주요 문제 목록 (심각도 기준 상위 5개, 클러스터에 많은 문제가 있을 때 "…및 N개 더" 꼬리 포함)
+:::
+
+출처: Kubernetes API 전용 — `kubectl version`, `kubectl get nodes`, `kubectl get pods -A`를 병렬로 팬아웃.
+
+---
+
+## 작동 방식
+
+스킬은 세 목록을 동시에 가져와 각각을 컨텍스트별 캐시 디렉토리에 `cluster.json`, `nodes.json`, `pods.json`으로 씁니다. 집계와 심각도 순위 지정은 해당 JSON에서 클라이언트 측에서 수행되므로 TTL 기간 내 반복 실행은 API를 완전히 건너뜁니다.
+
+요약 블록은 다음과 같습니다:
+
+```text
+Cluster: prod-us-east · Kubernetes v1.30.4 · EKS
+
+Nodes  12/12 Ready · 1 pressure · 0 unschedulable · 3 control-plane, 9 worker
+Pods   184/187 Ready · 4 pod(s) with restarts
+
+Issues (6):
+  payments/checkout-7c9  CrashLoopBackOff  17 restarts in 42m
+  ingress/nginx-0        MemoryPressure    node ip-10-0-3-14
+  ...                                      (top 5 by severity)
+  …and 1 more
+
+Snapshot cached (TTL 15m). Ask to drill in — e.g. "list nodes", "list pods", "pods on <node>", "which nodes are tainted".
+```
+
+클러스터가 정상이면 `Issues` 블록은 생략됩니다. 푸터는 스냅샷이 새로 가져온 것인지 캐시에서 제공된 것인지, 그리고 캐시된 데이터의 경과 시간을 알려줍니다.
+
+---
+
+## 후속 질문
+
+요약에서는 의도적으로 노드별 및 파드별 테이블을 생략하여 초기 응답을 작게 유지합니다. 해당 내용을 보도록 요청하거나 세 개의 캐시된 JSON 파일에서 답변할 수 있는 다른 내용을 요청하면, 에이전트는 스킬을 다시 실행하지 않고 `jq`로 캐시를 읽습니다:
+
+```text
+❯ /cluster-status
+[ summary... ]
+
+❯ list pods
+[ full pod table, rendered from pods.json ]
+
+❯ which pods are on ip-10-0-3-14?
+[ filtered from pods.json ]
+```
+
+캐시에 없는 데이터(이벤트, 로그, 특정 리소스의 YAML)의 경우 에이전트는 `/cluster-status`를 확장하는 대신 적절한 스킬 — [`/events`](/ko/reference/skills/events/), [`/logs`](/ko/reference/skills/logs/), [`/investigate`](/ko/reference/skills/investigate/) — 로 라우팅합니다.
+
+"refresh" / "fetch again" / "re-check"라고 말하면 에이전트가 `--refresh`로 스킬을 다시 호출합니다.
+
+---
+
+## 에이전트에게 전달되는 내용
+
+세 목록을 가져오는 것 외에도 스킬은 에이전트에게 후속 질문에서 어떻게 동작해야 하는지 안내합니다:
+
+- 스킬을 다시 호출하기보다 `jq`로 캐시된 `cluster.json` / `nodes.json` / `pods.json`에서 답변하는 것을 우선합니다 — 캐시가 요약을 제한된 크기로 유지하는 핵심입니다.
+- 사용자가 요청하거나 후속 질문이 명확히 시간에 민감한 경우("노드가 아직 복구되었나요?")에만 `--refresh`로 다시 호출합니다.
+- 요약을 짧게 유지합니다 — 세부 요청(전체 테이블, 노드별 드릴다운)은 요약 블록을 늘리는 대신 캐시 읽기로 라우팅합니다.
+- 세 개의 캐시된 파일에 없는 항목은 이 스킬을 확장하는 대신 [`/events`](/ko/reference/skills/events/), [`/logs`](/ko/reference/skills/logs/), [`/investigate`](/ko/reference/skills/investigate/)로 전달합니다.
+
+---
+
+## 옵션
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>캐시를 우회하고 API에서 새로운 데이터를 가져옵니다.</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>캐시된 스냅샷이 이보다 오래된 경우에만 다시 가져옵니다 (kubectl 스타일: <code>5m</code>, <code>1h</code>, <code>24h</code>). 기본값: <code>15m</code>. <code>--refresh</code>가 설정된 경우 무시됩니다.</dd>
+</dl>
+
+[개요](/ko/reference/skills/overview/)의 글로벌 플래그도 적용됩니다.

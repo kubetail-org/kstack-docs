@@ -1,0 +1,99 @@
+---
+title: /events
+description: Events recentes do cluster, agrupados por reason e classificados por severidade para que o sinal não se perca no ruído de `Pulled`/`Created`/`Started`.
+---
+
+O Skill `/events` obtém events recentes do Kubernetes e os agrupa em uma lista curta e classificada — primeiro os events `Warning`, depois o que for notável em `Normal`. É somente leitura e nunca muta o estado do cluster.
+
+A saída é deliberadamente limitada para que a primeira resposta seja barata de ler e de re-emitir pelo modelo. A lista completa de events é escrita em um cache JSON local que o agent lê nas perguntas de acompanhamento, sem precisar consultar a API novamente.
+
+```text
+/events                            # snapshot (uses cache if fresh)
+/events --refresh                  # force a fresh fetch
+/events --ttl 5m                   # only re-fetch if older than 5m
+```
+
+Este Skill não aceita argumentos posicionais. Perguntas de acompanhamento ("only payments", "events on pod/checkout-7c9", "show me the suppressed Normal events") são respondidas a partir do cache — veja [Acompanhamentos](#acompanhamentos) abaixo.
+
+---
+
+## O que verifica
+
+:::note[Verificações]
+- Events `Warning` em todos os namespaces, agrupados por `(reason, involvedObject.kind, namespace)`
+- Events `Normal` que geralmente são significativos — `Killing`, `Preempting`, `NodeNotReady`, `Rebooted`, `FailedScheduling`, etc. — com os ruidosos (`Pulled`, `Created`, `Started`, `Scheduled`, `SuccessfulCreate`) colapsados em uma única linha final
+- Para cada grupo: contagem, primeiro/último timestamp, a mensagem mais recente e os objetos envolvidos (truncados quando há muitos)
+:::
+
+Fontes: apenas a API do Kubernetes — `kubectl get events --all-namespaces` (ou o equivalente contra `events.k8s.io/v1`), ordenado no lado do servidor por `lastTimestamp`.
+
+---
+
+## Como funciona
+
+O Skill obtém events do cluster em uma única chamada e escreve a lista completa em um diretório de cache por contexto como `events.json`. Agregação e classificação por severidade acontecem no lado do cliente sobre esse JSON, de modo que execuções repetidas dentro da janela TTL ignoram completamente a API.
+
+O bloco de resumo tem este formato:
+
+```text
+Events: prod-us-east · last 1h · 2 warning groups, 1 notable
+
+WARN  payments/Pod         BackOff             14×  2m ago   "Back-off restarting failed container server in pod checkout-7c9"
+WARN  ingress/Pod          FailedScheduling    1×   38m ago  "0/12 nodes are available: 3 node(s) had untolerated taint…"
+NOTE  kube-system/Node     NodeNotReady        1×   52m ago  "Node ip-10-0-3-14 status is now: NodeNotReady"
+
+…and 412 Normal events (Pulled, Created, Started, Scheduled) suppressed.
+
+Snapshot cached (TTL 5m). Ask to drill in — e.g. "only payments", "events on pod/checkout-7c9", "show suppressed".
+```
+
+Quando a janela está limpa, o Skill imprime uma única linha confirmando que não há nada a reportar e encerra.
+
+---
+
+## Acompanhamentos
+
+O resumo deliberadamente colapsa reasons `Normal` ruidosos e trunca detalhes por objeto para que a resposta inicial permaneça pequena. Quando você pede mais — ou qualquer coisa que possa ser respondida a partir da lista de events em cache — o agent lê o cache com `jq` em vez de re-executar o Skill:
+
+```text
+❯ /events
+[ summary... ]
+
+❯ only payments
+[ events filtered to namespace payments, from events.json ]
+
+❯ show the suppressed Normal events
+[ full Normal-event list, from events.json ]
+
+❯ events on pod/checkout-7c9
+[ filtered by involvedObject, walking owners one level up, from events.json ]
+```
+
+Para dados que não estão no cache (logs, YAML de um recurso específico, causa raiz entre múltiplas fontes), o agent roteia para o Skill certa — [`/logs`](/pt/reference/skills/logs/) ou [`/investigate`](/pt/reference/skills/investigate/) — em vez de ampliar o `/events`.
+
+Diga "atualizar" / "buscar novamente" / "verificar de novo" e o agent re-invoca o Skill com `--refresh`.
+
+---
+
+## O que o agent é instruído
+
+Além de obter a lista de events, o Skill orienta o agent sobre como se comportar nos acompanhamentos:
+
+- Preferir responder a partir do `events.json` em cache com `jq` em vez de re-invocar o Skill.
+- Tratar o conjunto de reasons ruidosos (`Pulled`, `Created`, `Started`, `Scheduled`, `SuccessfulCreate`) como colapsável — exibi-los apenas quando o usuário pedir o conjunto suprimido.
+- Quando o usuário perguntar sobre "events on `pod/X`", percorrer owners um nível acima (`Pod` → `ReplicaSet` → `Deployment`, `Pod` → `Job` → `CronJob`) para que events disparados contra o controller não sejam perdidos.
+- Encaminhar para [`/logs`](/pt/reference/skills/logs/) para a saída do container por trás de um `BackOff` ou `CrashLoopBackOff`, e para [`/investigate`](/pt/reference/skills/investigate/) quando um único recurso se tornar o foco.
+
+---
+
+## Opções
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>Ignora o cache e busca dados frescos da API.</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>Só re-busca se o snapshot em cache for mais antigo que isso (estilo kubectl: <code>1m</code>, <code>5m</code>, <code>1h</code>). Padrão: <code>5m</code>. Ignorado quando <code>--refresh</code> está definido.</dd>
+</dl>
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) também se aplicam.

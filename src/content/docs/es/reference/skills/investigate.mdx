@@ -1,0 +1,52 @@
+---
+title: /investigate
+description: 'Inicia una investigación de causa raíz sobre un recurso fallido o sospechoso — recopila un bundle inicial e informa al agente.'
+---
+
+El Skill `/investigate` es la forma de invocar a un agente para ayudarle a clasificar un problema en curso. Al usarla, el Skill recopila un bundle inicial de datos para usar como contexto (p. ej. specs, estados actuales y anteriores de contenedores, eventos sobre los recursos problemáticos) e informa al agente sobre lo disponible y cómo debe abordar la investigación.
+
+A partir de ahí, puede hacer preguntas de seguimiento en lenguaje natural y el agente decide si responde con lo que ya tiene, obtiene algo nuevo, o recurre a otra herramienta.
+
+```text
+/investigate                             # prompts for a target
+/investigate pod/checkout-7c9            # explicit kind/name
+/investigate the api deployment          # natural-language target
+/investigate why is checkout crashing    # natural-language + intent
+```
+
+Se admiten objetivos y delimitación en lenguaje natural (namespaces, selectores de etiquetas, nombres de workloads) (consulte [Descripción general](/es/reference/skills/overview/)).
+
+---
+
+## Qué recopila
+
+:::note[Bundle inicial]
+- Spec y estado de los recursos problemáticos
+- Eventos sobre los recursos problemáticos y sus propietarios (el `ReplicaSet` y `Deployment` de un `Pod`, el `CronJob` de un `Job`, etc.)
+- Logs de los contenedores actuales y, cuando están presentes, del anterior (`--previous`) — truncados a las líneas con mayor probabilidad de contener el fallo
+- Recursos relacionados obvios: `Service` de respaldo, `ConfigMap`s y `Secret`s montados (solo nombres, nunca contenido), `PVC`s vinculados, `ServiceAccount` referenciado
+- El node en que están programados los pods problemáticos, cuando es relevante — condiciones, capacidad y si está bajo presión
+:::
+
+Fuentes: solo la API de Kubernetes.
+
+---
+
+## Qué se le indica al agente
+
+El Skill orienta al agente sobre cómo abordar mejor una investigación:
+
+- Cómo leer el bundle de datos y qué señales tienden a apuntar a dónde (códigos de salida, razones de eventos, combinaciones de estado comunes).
+- Que los seguimientos que necesitan estado actual deben volver a obtener datos en lugar de razonar sobre el bundle (posiblemente ya desactualizado).
+- Que hay disponible un watcher de eventos delimitado cuando la situación amerite observación continua.
+- Cuándo derivar a un Skill vecina: [`/logs`](/es/reference/skills/logs/) para una cola en vivo, [`/exec`](/es/reference/skills/exec/) para un shell, [`/metrics`](/es/reference/skills/metrics/) para el uso de recursos a lo largo del tiempo.
+
+Con ese contexto cargado, el resto de la sesión es conversación ordinaria — pregunte lo que quiera, en cualquier forma que tome el problema.
+
+---
+
+## Opciones
+
+`/investigate` no acepta flags específicos del Skill. Delimite los logs, la ventana de tiempo o los recursos mediante lenguaje natural en el prompt o en un seguimiento.
+
+Se aplican los flags globales de [Descripción general](/es/reference/skills/overview/).

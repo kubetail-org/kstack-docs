@@ -1,0 +1,99 @@
+---
+title: /events
+description: '最近のクラスターイベント。`Pulled`/`Created`/`Started` ノイズに埋もれないよう、理由別にグループ化され重大度でランク付けされます。'
+---
+
+`/events` スキルは最近のKubernetesイベントを取得し、短いランク付きリストにまとめます — まず `Warning` イベント、次に `Normal` の中で注目すべきもの。読み取り専用であり、クラスターの状態を変更しません。
+
+出力は最初のレスポンスが読み取りコスト・モデルへの再送信コストが低いよう、意図的に抑えられています。完全なイベントリストはローカルJSONキャッシュに書き込まれ、エージェントはAPIを再呼び出しすることなくフォローアップの質問でそこから読み取ります。
+
+```text
+/events                            # snapshot (uses cache if fresh)
+/events --refresh                  # force a fresh fetch
+/events --ttl 5m                   # only re-fetch if older than 5m
+```
+
+このスキルは位置引数を取りません。フォローアップの質問（「paymentsのみ」、「pod/checkout-7c9のイベント」、「抑制されたNormalイベントを表示」）はキャッシュから回答されます — 下記の[フォローアップ](#フォローアップ)を参照してください。
+
+---
+
+## チェック内容
+
+:::note[チェック項目]
+- すべてのNamespaceにわたる `Warning` イベント（`(reason, involvedObject.kind, namespace)` でグループ化）
+- 通常意味のある `Normal` イベント — `Killing`、`Preempting`、`NodeNotReady`、`Rebooted`、`FailedScheduling` など — 冗長なもの（`Pulled`、`Created`、`Started`、`Scheduled`、`SuccessfulCreate`）は1つの末尾行にまとめられます
+- 各グループ：件数、最初/最後のタイムスタンプ、最新メッセージ、関連オブジェクト（多数の場合は省略）
+:::
+
+ソース：Kubernetes APIのみ — `kubectl get events --all-namespaces`（または `events.k8s.io/v1` の同等のもの）、サーバーサイドで `lastTimestamp` でソート。
+
+---
+
+## 動作
+
+スキルは1回の呼び出しでクラスターのイベントを取得し、完全なリストをコンテキストごとのキャッシュディレクトリに `events.json` として書き込みます。集計と重大度ランキングはそのJSONに対してクライアントサイドで行われるため、TTLウィンドウ内での繰り返し実行はAPIをまったく呼び出しません。
+
+サマリーブロックの例：
+
+```text
+Events: prod-us-east · last 1h · 2 warning groups, 1 notable
+
+WARN  payments/Pod         BackOff             14×  2m ago   "Back-off restarting failed container server in pod checkout-7c9"
+WARN  ingress/Pod          FailedScheduling    1×   38m ago  "0/12 nodes are available: 3 node(s) had untolerated taint…"
+NOTE  kube-system/Node     NodeNotReady        1×   52m ago  "Node ip-10-0-3-14 status is now: NodeNotReady"
+
+…and 412 Normal events (Pulled, Created, Started, Scheduled) suppressed.
+
+Snapshot cached (TTL 5m). Ask to drill in — e.g. "only payments", "events on pod/checkout-7c9", "show suppressed".
+```
+
+ウィンドウがクリーンな場合、スキルは報告するものがないことを確認する1行を出力して終了します。
+
+---
+
+## フォローアップ
+
+サマリーは冗長な `Normal` の理由を意図的に折りたたみ、オブジェクトごとの詳細を省略して初期レスポンスを小さく保ちます。さらに多くを要求した場合、またはキャッシュされたイベントリストから回答できる他の質問をした場合、エージェントはスキルを再実行するのではなく `jq` でキャッシュを読み取ります。
+
+```text
+❯ /events
+[ summary... ]
+
+❯ only payments
+[ events filtered to namespace payments, from events.json ]
+
+❯ show the suppressed Normal events
+[ full Normal-event list, from events.json ]
+
+❯ events on pod/checkout-7c9
+[ filtered by involvedObject, walking owners one level up, from events.json ]
+```
+
+キャッシュにないデータ（ログ、特定リソースのYAML、複数ソースにわたる根本原因）については、エージェントは `/events` を拡張するのではなく、適切なスキル — [`/logs`](/ja/reference/skills/logs/) または [`/investigate`](/ja/reference/skills/investigate/) — にルーティングします。
+
+「refresh」/「fetch again」/「re-check」と言うと、エージェントは `--refresh` 付きでスキルを再実行します。
+
+---
+
+## エージェントへの指示
+
+スキルはイベントリストを取得するだけでなく、フォローアップ時の動作についてエージェントに指示します。
+
+- スキルを再実行するよりも、キャッシュされた `events.json` に対して `jq` で回答することを優先します。
+- 冗長な理由セット（`Pulled`、`Created`、`Started`、`Scheduled`、`SuccessfulCreate`）は折りたたみ可能として扱います — ユーザーが抑制されたセットを要求した場合にのみ表示します。
+- ユーザーが「`pod/X` のイベント」について尋ねた場合、コントローラーに発生したイベントが見逃されないよう、オーナーを1レベル上に辿ります（`Pod` → `ReplicaSet` → `Deployment`、`Pod` → `Job` → `CronJob`）。
+- `BackOff` または `CrashLoopBackOff` の背後にあるコンテナ出力については [`/logs`](/ja/reference/skills/logs/) に、単一リソースにフォーカスが当たった場合は [`/investigate`](/ja/reference/skills/investigate/) に渡します。
+
+---
+
+## オプション
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>キャッシュをバイパスしてAPIから新鮮なデータを取得します。</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>キャッシュされたスナップショットがこれより古い場合にのみ再取得します（kubectlスタイル：<code>1m</code>、<code>5m</code>、<code>1h</code>）。デフォルト：<code>5m</code>。<code>--refresh</code> が設定されている場合は無視されます。</dd>
+</dl>
+
+[概要](/ja/reference/skills/overview/)のグローバルフラグも適用されます。

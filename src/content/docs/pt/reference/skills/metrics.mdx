@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: Busca métricas de CPU, memória e outros recursos para pods, nodes e workloads — via linguagem natural, somente leitura.
+---
+
+O Skill `/metrics` é um buscador de métricas com tecnologia de IA. Descreva o que você quer ver e o agent resolve o alvo certo, escolhe uma janela de tempo razoável e retorna um resumo compacto. É somente leitura e nunca muta o estado do cluster.
+
+Quando o Skill `/metrics` é invocada, o agent é instruído a consultar o `metrics-server` para dados ao vivo e Prometheus para histórico. Se precisar de uma ferramenta que não estiver disponível, o agent se oferecerá para instalá-la. Também são fornecidas diretrizes sobre como exibir os dados para que a saída seja limitada e eficiente de processar pelo modelo.
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+Escopo em linguagem natural (namespaces, label selectors, nomes de workload, janelas de tempo, nomes de métricas) é suportado (veja [Visão geral](/pt/reference/skills/overview/)). O agent traduz sua descrição na consulta apropriada contra qualquer fonte disponível.
+
+---
+
+## Fontes de dados
+
+Fontes, em ordem de preferência com base na consulta:
+
+- **`metrics-server`** — usado para snapshots ao vivo via `kubectl top`. Se Prometheus não estiver disponível, o Skill usa isso para qualquer consulta e sinaliza na saída que a resposta é uma amostra pontual e não uma janela.
+- **Prometheus** — usado quando o agent detecta um Prometheus no cluster e a pergunta tem uma janela de tempo. Consultado via seu serviço in-cluster sobre PromQL.
+
+O Skill nunca faz scrape de exporters diretamente e não lê endpoints de métricas de fora do cluster (ex.: DataDog, Grafana Cloud).
+
+---
+
+## O que o agent é instruído
+
+Além de instruir o agent sobre onde buscar dados, o Skill orienta o agent sobre como se comportar:
+
+- Preferir Prometheus ao `metrics-server` sempre que a pergunta tiver uma janela de tempo; fazer fallback para `metrics-server` em snapshots ao vivo mas rotular a saída com `source: metrics-server` para que o leitor não seja induzido em erro sobre janelamento.
+- Reportar estatísticas de resumo (p50, p95, max) em vez de passar a série completa pelo modelo.
+- Se a consulta resolvida cobrir muito mais pods ou uma janela mais ampla do que o usuário provavelmente pretendia, mostrar a consulta resolvida e perguntar antes de executá-la.
+- Sinalizar label sets que incorporam tenant IDs, user IDs ou segmentos de caminho como potencialmente sensíveis; não repetir esses labels no chat a menos que o usuário peça explicitamente.
+- Encaminhar para fora desta Skill conforme a seção [Encaminhamentos](#encaminhamentos) abaixo em vez de ampliá-la para uma ferramenta geral de observabilidade.
+
+---
+
+## Segurança
+
+`/metrics` é somente leitura. Ele emite `kubectl top` e consultas de range do Prometheus contra o alvo que você descreveu, e nada mais — sem exec, sem escritas, sem acesso a conteúdo de pods ou logs. Se a descrição resolver para mais pods ou uma janela mais ampla do que você provavelmente pretendia, o agent mostrará a consulta resolvida e perguntará antes de executá-la.
+
+Os próprios valores de métricas raramente contêm dados sensíveis, mas label sets podem — um nome de métrica personalizado ou label que incorpore um tenant ID, user ID ou segmento de caminho entra no contexto do agent da mesma forma que linhas de log. Restrinja consultas ao workload de interesse em vez de wildcards amplos. Veja [Segurança](/pt/concepts/security/) para o modelo de confiança completo.
+
+---
+
+## Encaminhamentos
+
+Para qualquer coisa fora do uso de recursos, o agent roteia para um Skill vizinha em vez de ampliar `/metrics`:
+
+- [`/logs`](/pt/reference/skills/logs/) quando você quiser ver *por que* a CPU ou memória de um pod mudou
+- [`/investigate`](/pt/reference/skills/investigate/) quando o uso é sintoma de um recurso com falha e você quer contexto de causa raiz
+- [`/audit-cost`](/pt/reference/skills/audit-cost/) para uma varredura completa de right-sizing em vez de uma verificação pontual
+
+---
+
+## Opções
+
+`/metrics` não aceita sinalizadores específicos do Skill no MVP. Defina o escopo do alvo, métrica e janela de tempo via linguagem natural no prompt ou em um acompanhamento.
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) se aplicam.

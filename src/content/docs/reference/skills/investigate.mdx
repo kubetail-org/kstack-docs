@@ -1,0 +1,52 @@
+---
+title: /investigate
+description: Kick off a root-cause investigation on a failing or suspicious resource — gathers an initial bundle and briefs the agent.
+---
+
+The `/investigate` skill is how you pull in an agent to help you triage an ongoing issue. When used, the skill pulls in an initial bundle of data to use as context (e.g. specs, current and previous container statuses, events on the problematic resources) and briefs the agent on the what's available and how it should approach the investigation.
+
+From there, you can ask follow-up questions in natural language and the agent decides whether to answer from what it already has, fetch something new, or reach for another tool.
+
+```text
+/investigate                             # prompts for a target
+/investigate pod/checkout-7c9            # explicit kind/name
+/investigate the api deployment          # natural-language target
+/investigate why is checkout crashing    # natural-language + intent
+```
+
+Natural-language targets and scoping (namespaces, label selectors, workload names) are supported (see [Overview](/reference/skills/overview/)).
+
+---
+
+## What it gathers
+
+:::note[Initial bundle]
+- Spec and status of the the problematic resources
+- Events on the problematic resources and their owners (a `Pod`'s `ReplicaSet` and `Deployment`, a `Job`'s `CronJob`, etc.)
+- Logs from current containers and, when present, the previous one (`--previous`) — truncated to the lines most likely to contain the failure
+- Obvious related resources: backing `Service`, mounted `ConfigMap`s and `Secret`s (names only, never contents), bound `PVC`s, referenced `ServiceAccount`
+- The node the problematic pods are scheduled on, when relevant — conditions, capacity, and whether it's under pressure
+:::
+
+Sources: Kubernetes API only.
+
+---
+
+## What the agent is told
+
+The skill briefs the agent on how best to approach an investigation:
+
+- How to read the data bundle and what signals tend to point where (exit codes, event reasons, common state combinations).
+- That follow-ups which need current state should re-fetch rather than reason from the (now possibly stale) bundle.
+- That a scoped event watch is available when the situation warrants ongoing observation.
+- When to hand off to a neighboring skill: [`/logs`](/reference/skills/logs/) for a live tail, [`/exec`](/reference/skills/exec/) for a shell, [`/metrics`](/reference/skills/metrics/) for resource usage over time.
+
+With that context loaded, the rest of the session is ordinary conversation — ask what you want, in whatever shape the problem takes.
+
+---
+
+## Options
+
+`/investigate` takes no skill-specific flags. Scope the logs, time window, or resources via natural language in the prompt or in a follow-up.
+
+Global flags from [Overview](/reference/skills/overview/) apply.

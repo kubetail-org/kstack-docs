@@ -1,0 +1,87 @@
+---
+title: kstack
+description: Kstack é um pacote de Skills para Claude Code que ajuda você a realizar tarefas de monitoramento, solução de problemas e auditoria nos seus clusters K8s de forma inteligente e eficiente.
+template: doc
+head:
+  - tag: title
+    content: kstack - Pacote de Skills com IA para Monitoramento, Solução de Problemas e Auditoria de Clusters Kubernetes
+hero:
+  tagline: Pacote de Skills para Claude Code que ajuda você a monitorar seus clusters K8s de forma superinteligente.
+  image:
+    file: ../../../assets/logo-icon.svg
+  actions:
+    - text: Ver Código-fonte
+      link: https://github.com/kubetail-org/kstack
+      icon: github
+    - text: Entrar no Discord
+      link: https://discord.gg/CmsmWAVkvX
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+---
+
+## Início rápido
+
+Para instalar os Skills do kstack globalmente, execute este comando:
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+Alternativamente, você pode instalá-las localmente dentro de um diretório de projeto específico:
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+Após a instalação, os Skills estarão disponíveis dentro das suas sessões de agent:
+
+```
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+Por padrão, o script instala os Skills com o prefixo de namespace `kstack-*`, mas você pode desativar isso com o sinalizador `--no-prefix`. Ele também instala os Skills para todos os seus agents disponíveis (ex.: Claude, Codex, OpenCode), mas você pode selecionar agents individuais com o sinalizador `--agent` (veja [Instalação](/pt/tutorials/installation)).
+
+O kstack usa seu arquivo `kubeconfig` local para autenticação e respeitará suas permissões RBAC. Se encontrar problemas de permissão, irá informá-lo.
+
+---
+
+## Skills
+
+**Monitoramento**
+* [`/cluster-status`](/pt/reference/skills/cluster-status) — Snapshot de saúde (reinicializações de pod, condições de node, pressão de recursos)
+* [`/events`](/pt/reference/skills/events) — Eventos recentes, classificados por severidade
+
+**Solução de problemas**
+* [`/investigate`](/pt/reference/skills/investigate) — Análise de causa raiz entre eventos, logs e recursos relacionados
+* [`/logs`](/pt/reference/skills/logs) — Sessão tmux compartilhada que traduz linguagem natural em buscas e análise de logs (via [Kubetail](https://github.com/kubetail-org/kubetail))
+* [`/metrics`](/pt/reference/skills/metrics) — Busca métricas de CPU, memória e outros recursos para pods, nodes e workloads
+* [`/exec`](/pt/reference/skills/exec) — Shell tmux compartilhado em um pod, node ou container de debug efêmero
+
+**Auditorias**
+* [`/audit-security`](/pt/reference/skills/audit-security) — RBAC, postura de segurança de pod, redução de privilégios
+* [`/audit-network`](/pt/reference/skills/audit-network) — Verificações de NetworkPolicy, Service, Ingress, GatewayAPI, DNS e criptografia
+* [`/audit-cost`](/pt/reference/skills/audit-cost) — Requests vs. uso real, superprovisionamento, capacidade ociosa
+* [`/audit-outdated`](/pt/reference/skills/audit-outdated) — Serviços desatualizados, CVEs conhecidos, atualizações de versão disponíveis
+
+**Diversos**
+* [`/cleanup`](/pt/reference/skills/cleanup) — Remove todos os recursos gerenciados pelo kstack do cluster (containers de debug, clones de pod, watcher jobs)
+* [`/forget`](/pt/reference/skills/forget) — Limpa o cache local do kstack e descarta o que ele aprendeu sobre seu(s) cluster(s)
+
+---
+
+## Próximos passos
+
+<CardGrid>
+	<Card title="Introdução" icon="open-book">
+		Saiba o que é o kstack, como funciona e os problemas que resolve. [Leia a introdução](/pt/concepts/introduction).
+	</Card>
+	<Card title="Skills" icon="rocket">
+		Explore a referência completa de Skills para monitoramento, solução de problemas e auditoria dos seus clusters. [Ver Skills](/pt/reference/skills/overview).
+	</Card>
+</CardGrid>

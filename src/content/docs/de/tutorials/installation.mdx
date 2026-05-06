@@ -1,0 +1,124 @@
+---
+title: Installation
+description: kstack installieren, aktualisieren und deinstallieren — global oder innerhalb eines einzelnen Projekts, für Claude Code oder jeden unterstützten Agent.
+---
+
+Kstack installiert sich, indem es das neueste getaggte Release von GitHub bezieht und Skills in das Skills-Verzeichnis deines Agents rendert. Derselbe einzeilige Bootstrap übernimmt Claude Code und jeden anderen unterstützten Agent in deinem `PATH`.
+
+## Installieren
+
+### Global
+
+Um kstack im „globalen" Modus zu installieren, damit die Skills von jedem Projekt auf deinem Rechner verfügbar sind, führe aus:
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+Damit wird das neueste getaggte Release von [kubetail-org/kstack](https://github.com/kubetail-org/kstack) in `~/.config/kstack/upstream/` geklont und jeder Skill in das Skills-Verzeichnis jeder Agent-CLI gerendert, die im `PATH` gefunden wird. Sobald das Skript fertig ist, kannst du eine beliebige Agent-Session öffnen und die kstack-Skills sind verfügbar:
+
+```bash
+$ claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+Standardmäßig stellt das `install`-Skript den Skill-Namen ein Namespace-Präfix `kstack-*` voran. Das kann mit dem Flag `--no-prefix` beim Ausführen des Install-Skripts deaktiviert werden (siehe unten).
+
+### Lokal
+
+Um kstack im „lokalen" Modus zu installieren, damit die Skills nur verfügbar sind, wenn der Agent aus einem einzelnen Projektverzeichnis ausgeführt wird, führe aus:
+
+```bash
+cd myproject
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+Damit wird das neueste getaggte Release von [kubetail-org/kstack](https://github.com/kubetail-org/kstack) in `<project>/.kstack/upstream/` geklont und die Skills in `<project>/.<agent>/skills/` gerendert. Sobald das Skript fertig ist, kannst du eine Agent-Session aus diesem Projektverzeichnis öffnen und die kstack-Skills sind verfügbar:
+
+```bash
+$ cd myproject && claude
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+Standardmäßig stellt das `install`-Skript den Skill-Namen ein Namespace-Präfix `kstack-*` voran. Das kann mit dem Flag `--no-prefix` beim Ausführen des Install-Skripts deaktiviert werden (siehe unten).
+
+### Namespace-Präfix entfernen
+
+Wenn du die Skills lieber ohne das Namespace-Präfix `kstack-*` installieren möchtest, verwende das Flag `--no-prefix`:
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --no-prefix
+```
+
+Damit wird aus `/kstack-cluster-status` ein `/cluster-status`, aus `/kstack-events` ein `/events` und so weiter. Die Option funktioniert sowohl bei globalen als auch lokalen Installationen.
+
+### Einen bestimmten Agent als Ziel festlegen
+
+Standardmäßig installiert der Bootstrap in jeden unterstützten Agent, den er in deinem `PATH` erkennt. Um die Installation auf einen Agent zu beschränken, übergib `--agent <name>`:
+
+| Agent            | Flag               | Globaler Installationspfad     |
+|------------------|--------------------|--------------------------------|
+| Claude Code      | `--agent claude`   | `~/.claude/skills/`            |
+| OpenAI Codex CLI | `--agent codex`    | `~/.codex/skills/`             |
+| OpenCode         | `--agent opencode` | `~/.config/opencode/skills/`   |
+| Cursor           | `--agent cursor`   | `~/.cursor/skills/`            |
+| Factory Droid    | `--agent factory`  | `~/.factory/skills/`           |
+| Slate            | `--agent slate`    | `~/.slate/skills/`             |
+| Kiro             | `--agent kiro`     | `~/.kiro/skills/`              |
+| Hermes           | `--agent hermes`   | `~/.hermes/skills/`            |
+
+Lokale Installationen spiegeln diese Struktur im Projektverzeichnis (z. B. `<project>/.codex/skills/`). Hinweise zu einzelnen Agents findest du unter [kstack mit Nicht-Claude-Agents verwenden](/de/guides/non-claude-agents/).
+
+### Verzeichnisstruktur
+
+Das Bootstrap-Skript erstellt folgende Verzeichnisstruktur:
+
+```
+<kstack-root>/
+├── upstream/        # pinned checkout of kubetail-org/kstack at the release tag
+├── bin/
+│   ├── upgrade      # helper used by "upgrade kstack"
+│   └── uninstall    # helper used below
+├── cache/           # per-context cache (query results, log buffers)
+└── state/           # per-context learned state (detected integrations, fingerprints)
+```
+
+Dazu ein Verzeichnis pro erkanntem Agent, z. B. `~/.claude/skills/cluster-status/`, `~/.claude/skills/events/` und so weiter.
+
+## Upgrade
+
+Wenn du einen kstack-Skill ausführst, prüft der Agent still, ob ein neueres kstack-Release verfügbar ist, und zeigt oben in seiner Antwort einen einzeiligen Hinweis an, wenn er eines findet. Sag einfach **„upgrade kstack"** und der Agent führt den Upgrade-Helper in deinem Namen aus; sag **„dismiss"**, um den Hinweis bis zum nächsten Release auszublenden.
+
+Du kannst den Helper auch direkt ausführen:
+
+```bash
+# Global install
+~/.config/kstack/bin/upgrade
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/upgrade
+```
+
+Der Helper bezieht das neueste Tag in den bestehenden Upstream-Checkout und rendert die Skills neu. Upgrades sind idempotent und jederzeit sicher ausführbar — deine Verzeichnisse `cache/` und `state/` bleiben erhalten, sodass kstack behält, was es bereits über deine Cluster gelernt hat.
+
+Das erneute Ausführen des curl-Bootstraps funktioniert ebenfalls und führt zum gleichen Ergebnis; der dedizierte Helper überspringt lediglich den Netzwerk-Roundtrip zum Auflösen des Installationspfads.
+
+## Deinstallieren
+
+Zum Deinstallieren führe das mit deiner Installation gebündelte `uninstall`-Skript aus:
+
+```bash
+# Global install
+~/.config/kstack/bin/uninstall
+
+# Local install (from the project directory)
+<project-root>/.kstack/bin/uninstall
+```
+
+Der Helper fragt vor dem Entfernen nach. Er löscht das Installations-Root (`~/.config/kstack` oder `<project>/.kstack`) und jeden kstack-eigenen Skill-Slot über alle Agents, in denen installiert wurde. Vom Benutzer erstellte Skills in denselben Agent-Verzeichnissen bleiben unberührt — der Deinstaller entfernt nur Slots, die er selbst geschrieben hat.
+
+Die Deinstallation berührt keine Ressourcen, die kstack möglicherweise in deinen Clustern erstellt hat (Debug-Container, Pod-Klone, Watcher-Jobs). Um diese zu entfernen, führe [`/cleanup`](/de/reference/skills/cleanup/) **vor** der Deinstallation aus, solange die Skills noch verfügbar sind.

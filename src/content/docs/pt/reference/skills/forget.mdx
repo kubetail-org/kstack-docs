@@ -1,0 +1,50 @@
+---
+title: /forget
+description: Limpa o cache local do kstack e descarta o que ele aprendeu sobre seu(s) cluster(s).
+---
+
+O Skill `/forget` apaga o estado local do kstack na sua máquina. Com o tempo, o kstack acumula uma memória de trabalho dos seus clusters — resultados de consultas recentes, integrações detectadas, fingerprints de recursos e baselines que usa para detectar anomalias. Este Skill força a limpeza desses dados para que o agent possa começar do zero.
+
+Este Skill não toca nada no cluster. Para remover recursos gerenciados pelo kstack do próprio cluster, veja [`/cleanup`](/pt/reference/skills/cleanup/).
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[Somente invocado pelo usuário]
+`/forget` é distribuído com `disable-model-invocation: true`. O agent nunca limpará o estado local por conta própria — ele só executa quando você digitar explicitamente `/forget`, para que você não perca contexto em cache inesperadamente.
+:::
+
+---
+
+## O que limpa
+
+O estado fica em `~/.config/kstack/`, particionado por contexto kubeconfig — esquecer `staging` nunca afeta `prod`.
+
+:::note[Estado local]
+- **Cache** (`~/.config/kstack/cache/<context>/`) — resultados de consultas recentes, buffers de log, tabelas de dedup, estado de watcher jobs em andamento. Barato de reconstruir; limpo livremente.
+- **Estado aprendido** (`~/.config/kstack/state/<context>/`) — integrações detectadas, fingerprints de recursos, baselines, preferências por cluster. Reconstruído no próximo uso, mas pode levar algumas interações para se recompor completamente.
+:::
+
+Por padrão, o Skill limpa ambos para o contexto atual.
+
+---
+
+## Quando executar
+
+- O cluster foi reconstruído ou migrado e sua identidade antiga não corresponde mais ao que o kstack lembra.
+- Você quer que o kstack reaprenda do zero — os baselines parecem desatualizados, ou uma sessão anterior ensinou algo errado.
+- Você está passando a máquina para outra pessoa e não quer deixar nenhum estado específico de cluster para trás.
+
+---
+
+## Opções
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>Limpa cache e estado aprendido para todos os contextos, não apenas o atual</dd>
+</dl>
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) também se aplicam.

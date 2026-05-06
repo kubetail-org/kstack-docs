@@ -1,0 +1,87 @@
+---
+title: kstack
+description: 'KstackはClaude Code向けのスキルパックで、K8sクラスターの監視、トラブルシューティング、監査タスクをスマートかつ効率的に実行できます。'
+template: doc
+head:
+  - tag: title
+    content: 'kstack - Kubernetes クラスター監視・トラブルシューティング・監査向け AI スキルパック'
+hero:
+  tagline: 'K8sクラスターを超知能的に監視するClaude Code向けスキルパック。'
+  image:
+    file: ../../../assets/logo-icon.svg
+  actions:
+    - text: ソースを見る
+      link: https://github.com/kubetail-org/kstack
+      icon: github
+    - text: Discord に参加
+      link: https://discord.gg/CmsmWAVkvX
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+---
+
+## クイックスタート
+
+kstackのスキルをグローバルにインストールするには、次のコマンドを実行します。
+
+```bash
+curl -sS https://kstack.sh/install | bash
+```
+
+特定のプロジェクトディレクトリ内にローカルインストールすることもできます。
+
+```bash
+curl -sS https://kstack.sh/install | bash -s -- --local
+```
+
+インストール後、エージェントセッション内でスキルが利用可能になります。
+
+```
+───────────────────────────────────
+❯ /kstack-cluster-status
+───────────────────────────────────
+```
+
+デフォルトでは、スクリプトは `kstack-*` Namespace プレフィックス付きでスキルをインストールしますが、`--no-prefix` フラグで無効化できます。また、利用可能なすべてのエージェント（Claude、Codex、OpenCodeなど）にスキルをインストールしますが、`--agent` フラグで特定のエージェントを指定することもできます（[インストール](/ja/tutorials/installation)を参照）。
+
+kstackはローカルの `kubeconfig` ファイルを認証に使用し、RBACパーミッションを尊重します。パーミッションの問題が発生した場合は通知します。
+
+---
+
+## スキル
+
+**監視**
+* [`/cluster-status`](/ja/reference/skills/cluster-status) — ヘルススナップショット（Pod再起動、Nodeコンディション、リソース圧迫）
+* [`/events`](/ja/reference/skills/events) — 重大度でランク付けされた最近のイベント
+
+**トラブルシューティング**
+* [`/investigate`](/ja/reference/skills/investigate) — イベント、ログ、関連リソースを横断した根本原因分析
+* [`/logs`](/ja/reference/skills/logs) — 自然言語をログ取得・分析に変換する共有tmuxセッション（[Kubetail](https://github.com/kubetail-org/kubetail)経由）
+* [`/metrics`](/ja/reference/skills/metrics) — Pod、Node、ワークロードのCPU・メモリ・その他リソースメトリクスの取得
+* [`/exec`](/ja/reference/skills/exec) — Pod、Node、またはエフェメラルデバッグコンテナへの共有tmuxシェル
+
+**監査**
+* [`/audit-security`](/ja/reference/skills/audit-security) — RBAC、Podセキュリティポスチャー、権限の最小化
+* [`/audit-network`](/ja/reference/skills/audit-network) — NetworkPolicy、Service、Ingress、GatewayAPI、DNS、暗号化チェック
+* [`/audit-cost`](/ja/reference/skills/audit-cost) — リクエスト対使用量、過剰プロビジョニング、アイドルキャパシティ
+* [`/audit-outdated`](/ja/reference/skills/audit-outdated) — 古いサービス、既知のCVE、利用可能なバージョンアップ
+
+**その他**
+* [`/cleanup`](/ja/reference/skills/cleanup) — クラスターからkstack所有リソースをすべて削除（デバッグコンテナ、Podクローン、ウォッチャー Job）
+* [`/forget`](/ja/reference/skills/forget) — kstackのローカルキャッシュをクリアし、クラスターについて学習した内容を破棄
+
+---
+
+## 次のステップ
+
+<CardGrid>
+	<Card title="はじめに" icon="open-book">
+		kstackとは何か、どのように動作するか、解決する問題について学びます。[はじめにを読む](/ja/concepts/introduction)
+	</Card>
+	<Card title="スキル" icon="rocket">
+		クラスターの監視、トラブルシューティング、監査のためのスキルリファレンス一覧を参照します。[スキルを見る](/ja/reference/skills/overview)
+	</Card>
+</CardGrid>

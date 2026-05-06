@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: CPU-, Speicher- und andere Ressourcen-Metriken für Pods, Nodes und Workloads abrufen — per natürlicher Sprache, schreibgeschützt.
+---
+
+Der `/metrics`-Skill ist ein KI-gestützter Metriken-Abrufer. Beschreibe, was du sehen möchtest, und der Agent ermittelt das richtige Ziel, wählt ein sinnvolles Zeitfenster und gibt eine kompakte Zusammenfassung zurück. Er ist schreibgeschützt und mutiert niemals den Cluster-Status.
+
+Wenn der `/metrics`-Skill aufgerufen wird, wird der Agent angewiesen, `metrics-server` für Live-Daten und Prometheus für Verlaufsdaten abzufragen. Wenn ein benötigtes Tool nicht verfügbar ist, bietet der Agent an, es für dich zu installieren. Er erhält außerdem Richtlinien zur Datenanzeige, sodass die Ausgabe begrenzt bleibt und effizient durch das Modell laufen kann.
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+Natürlichsprachiges Scoping (Namespaces, Label-Selektoren, Workload-Namen, Zeitfenster, Metrik-Namen) wird unterstützt (siehe [Übersicht](/de/reference/skills/overview/)). Der Agent übersetzt deine Beschreibung in die passende Abfrage gegen die verfügbare Quelle.
+
+---
+
+## Datenquellen
+
+Quellen, in der Reihenfolge der Präferenz basierend auf der Abfrage:
+
+- **`metrics-server`** — für Live-Snapshots via `kubectl top` verwendet. Wenn Prometheus nicht verfügbar ist, fällt der Skill für jede Abfrage darauf zurück und markiert in der Ausgabe, dass die Antwort eine Momentaufnahme und kein Fenster ist.
+- **Prometheus** — verwendet, wenn der Agent ein Prometheus im Cluster erkennt und die Frage ein Zeitfenster hat. Über seinen In-Cluster-Service per PromQL abgefragt.
+
+Der Skill scrapt niemals Exporter direkt und liest keine Metriken-Endpoints von außerhalb des Clusters (z. B. DataDog, Grafana Cloud).
+
+---
+
+## Was dem Agent mitgeteilt wird
+
+Über die Anweisung, woher Daten abzurufen sind, weist der Skill den Agent an, wie er sich verhalten soll:
+
+- Prometheus gegenüber `metrics-server` bevorzugen, wenn die Frage ein Zeitfenster hat; für Live-Snapshots auf `metrics-server` zurückfallen, aber die Ausgabe mit `source: metrics-server` kennzeichnen, damit der Leser nicht über das Fenster getäuscht wird.
+- Zusammenfassungsstatistiken (p50, p95, max) ausgeben anstatt die vollständige Serie durch das Modell zu leiten.
+- Wenn die aufgelöste Abfrage deutlich mehr Pods oder ein breiteres Fenster abdeckt als der Benutzer wahrscheinlich beabsichtigt hat, die aufgelöste Abfrage anzeigen und vor der Ausführung fragen.
+- Label-Sätze, die Tenant-IDs, User-IDs oder Pfadsegmente einbetten, als potenziell sensibel kennzeichnen; diese Labels nicht zurück in den Chat geben, es sei denn, der Benutzer fragt ausdrücklich.
+- Diesen Skill gemäß dem Abschnitt [Handoffs](#handoffs) unten weiterleiten anstatt ihn zu einem allgemeinen Observability-Tool zu erweitern.
+
+---
+
+## Sicherheit
+
+`/metrics` ist schreibgeschützt. Er gibt `kubectl top`- und Prometheus-Range-Abfragen gegen das beschriebene Ziel aus und sonst nichts — kein exec, keine Schreibvorgänge, kein Zugriff auf Pod-Inhalte oder Logs. Wenn die Beschreibung mehr Pods oder ein breiteres Fenster auflöst als wahrscheinlich beabsichtigt, zeigt der Agent die aufgelöste Abfrage an und fragt vor der Ausführung.
+
+Metrik-Werte selbst enthalten selten sensible Daten, Label-Sätze jedoch schon — ein benutzerdefinierter Metrik-Name oder ein Label, das eine Tenant-ID, User-ID oder ein Pfadsegment einbettet, landet im Kontext des Agents wie Log-Zeilen. Grenze Abfragen auf die Workload ein, die dich interessiert, anstatt breite Wildcards zu verwenden. Siehe [Sicherheit](/de/concepts/security/) für das vollständige Vertrauensmodell.
+
+---
+
+## Handoffs
+
+Für alles außerhalb der Ressourcennutzung leitet der Agent an einen benachbarten Skill weiter anstatt `/metrics` zu erweitern:
+
+- [`/logs`](/de/reference/skills/logs/) wenn du sehen möchtest, *warum* die CPU oder der Speicher eines Pods sich bewegt hat
+- [`/investigate`](/de/reference/skills/investigate/) wenn die Nutzung ein Symptom einer fehlerhaften Ressource ist und du Root-Cause-Kontext möchtest
+- [`/audit-cost`](/de/reference/skills/audit-cost/) für einen vollständigen Right-Sizing-Sweep anstatt einer einmaligen Prüfung
+
+---
+
+## Optionen
+
+`/metrics` nimmt im MVP keine Skill-spezifischen Flags. Ziel, Metrik und Zeitfenster über natürliche Sprache im Prompt oder in einer Folgefrage eingrenzen.
+
+Globale Flags aus [Übersicht](/de/reference/skills/overview/) gelten.

@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: 资源浪费检测与资源调优建议。
+---
+
+`/audit-cost` 技能用于检测过度配置的工作负载。
+
+不带参数运行可进行全面扫描，也可指定工作流名称以限定报告范围。
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+每个工作流均支持自然语言范围限定（命名空间、标签选择器、工作负载名称），参见[概述](/zh-cn/reference/skills/overview/)。
+
+---
+
+## 工作流
+
+### 1. CPU 和内存请求量与实际使用量对比
+
+:::note[检查]
+- `resources.requests` 显著高于观测 p95 使用量的容器
+- 完全未设置 `resources.requests` 的容器
+- 容器触达内存限制（时间窗口内出现 OOMKill）
+:::
+
+数据来源：实时使用量来自 `metrics-server`，历史 p95 来自检测到的 Prometheus。
+
+### 2. 空闲工作负载
+
+:::note[检查]
+- 时间窗口内流量为零且 CPU 接近零的 Deployment 和 StatefulSet
+- 失败或暂停时间足够长、可视为废弃的 Job 和 CronJob
+:::
+
+数据来源：`metrics-server` 和 Kubernetes API（用于 Job/CronJob 状态）。
+
+### 3. 未使用的存储和负载均衡器
+
+:::note[检查]
+- 处于 `Released` 状态的 PersistentVolume，以及已绑定但未被任何 Pod 挂载的 PVC
+- 没有端点的 `LoadBalancer` 类型 Service 对象
+:::
+
+数据来源：Kubernetes API。
+
+---
+
+## 时间窗口
+
+资源调优需要历史数据。Prometheus 可用时，技能默认回溯 7 天；不可用时则回退到 `metrics-server` 实时快照。报告始终注明所用数据源及有效回溯范围。
+
+---
+
+## 代理收到的指引
+
+除工作流本身外，技能还向代理说明如何报告：
+
+- 在报告头部注明数据来源（`metrics-server` 表示实时，Prometheus 表示历史）和有效回溯范围 — Prometheus 的保留时长可能短于默认的 7 天。
+- 仅有 `metrics-server` 时，将需要 Prometheus 才能得出的结论标注为"不可用"，而不是静默跳过。
+- 仅标记实际影响足够大的请求量与使用量差距，细微差异属于噪声。
+- 当用户希望查看特定工作负载的底层时序数据时，转交给 [`/metrics`](/zh-cn/reference/skills/metrics/)。

@@ -1,0 +1,112 @@
+---
+title: /cluster-status
+description: A dense health snapshot of the cluster — node conditions, pod aggregates, and a ranked list of the issues that actually matter.
+---
+
+The `/cluster-status` skill produces a single dense health snapshot of the cluster: general cluster details, how many nodes and pods are healthy, and a short ranked list of the things that aren't. It is read-only and never mutates cluster state.
+
+The output is deliberately bounded (~10 lines regardless of cluster size) so the first response is cheap to read and cheap to re-emit through the model. The full per-node and per-pod detail is written to a local JSON cache that the agent reads from on follow-up questions, without re-hitting the API.
+
+```text
+/cluster-status                    # snapshot (uses cache if fresh)
+/cluster-status --refresh          # force a fresh fetch
+/cluster-status --ttl 1h           # only re-fetch if older than 1h
+```
+
+This skill takes no positional arguments. Follow-up questions ("list pods", "which nodes are tainted", "pods on worker-3") are answered from the cache — see [Follow-ups](#follow-ups) below.
+
+---
+
+## What it gathers
+
+:::note[Initial bundle]
+- **Cluster metadata** (`cluster.json`) — context name, Kubernetes version, and platform (EKS, GKE, kind, etc.), from `kubectl version` and `kubectl cluster-info`.
+- **Node list** (`nodes.json`) — every node's labels, taints, conditions (`Ready`, `MemoryPressure`, `DiskPressure`, `PIDPressure`, `SchedulingDisabled`), capacity, allocatable, and control-plane vs. worker role.
+- **Pod list** (`pods.json`) — every pod across all namespaces, including phase, `Ready` condition, container statuses, restart counts, owner references, and the node each pod is scheduled on.
+:::
+
+Sources: Kubernetes API only — `kubectl version`, `kubectl get nodes -o json`, and `kubectl get pods -A -o json`, fanned out in parallel. The three files are written to a per-context cache directory and reused on follow-ups within the TTL window.
+
+---
+
+## What it checks
+
+:::note[Checks]
+- Cluster identity — context name, Kubernetes version, and platform (EKS, GKE, kind, etc.)
+- Node `Ready` status, `MemoryPressure` / `DiskPressure` / `PIDPressure` conditions, `SchedulingDisabled`, and control-plane vs. worker split
+- Pod phase and `Ready` condition across all namespaces, plus pods with non-zero restart counts
+- A ranked top-issues list (top 5 by severity, with a "…and N more" tail when the cluster has a lot going wrong)
+:::
+
+Sources: Kubernetes API only — `kubectl version`, `kubectl get nodes`, and `kubectl get pods -A`, fanned out in parallel.
+
+---
+
+## How it works
+
+The skill fetches the three lists concurrently and writes each to a per-context cache directory as `cluster.json`, `nodes.json`, and `pods.json`. Aggregation and severity ranking happen client-side on that JSON, so repeat runs within the TTL window skip the API entirely.
+
+The summary block looks like this:
+
+```text
+Cluster: prod-us-east · Kubernetes v1.30.4 · EKS
+
+Nodes  12/12 Ready · 1 pressure · 0 unschedulable · 3 control-plane, 9 worker
+Pods   184/187 Ready · 4 pod(s) with restarts
+
+Issues (6):
+  payments/checkout-7c9  CrashLoopBackOff  17 restarts in 42m
+  ingress/nginx-0        MemoryPressure    node ip-10-0-3-14
+  ...                                      (top 5 by severity)
+  …and 1 more
+
+Snapshot cached (TTL 15m). Ask to drill in — e.g. "list nodes", "list pods", "pods on <node>", "which nodes are tainted".
+```
+
+The `Issues` block is omitted when the cluster is clean. The footer tells you whether the snapshot was freshly fetched or served from cache, and how old the cached data is.
+
+---
+
+## Follow-ups
+
+The summary deliberately omits the per-node and per-pod tables so the initial response stays small. When you ask to see them — or ask anything else that can be answered from the three cached JSON files — the agent reads the cache with `jq` instead of re-running the skill:
+
+```text
+❯ /cluster-status
+[ summary... ]
+
+❯ list pods
+[ full pod table, rendered from pods.json ]
+
+❯ which pods are on ip-10-0-3-14?
+[ filtered from pods.json ]
+```
+
+For data that isn't in the cache (events, logs, a specific resource's YAML), the agent routes to the right skill — [`/events`](/reference/skills/events/), [`/logs`](/reference/skills/logs/), or [`/investigate`](/reference/skills/investigate/) — rather than widening `/cluster-status`.
+
+Say "refresh" / "fetch again" / "re-check" and the agent re-invokes the skill with `--refresh`.
+
+---
+
+## What the agent is told
+
+Beyond fetching the three lists, the skill briefs the agent on how to behave on follow-ups:
+
+- Prefer answering from the cached `cluster.json` / `nodes.json` / `pods.json` with `jq` over re-invoking the skill — the cache is the point of the summary being bounded.
+- Re-invoke with `--refresh` only when the user asks for it or the follow-up is clearly time-sensitive ("has the node recovered yet?").
+- Keep the summary short — route detail requests (full tables, per-node drill-downs) to cache reads rather than growing the summary block.
+- Hand off to [`/events`](/reference/skills/events/), [`/logs`](/reference/skills/logs/), or [`/investigate`](/reference/skills/investigate/) for anything that isn't in the three cached files, rather than widening this skill.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>Bypass the cache and fetch fresh data from the API.</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>Only re-fetch if the cached snapshot is older than this (kubectl-style: <code>5m</code>, <code>1h</code>, <code>24h</code>). Default: <code>15m</code>. Ignored when <code>--refresh</code> is set.</dd>
+</dl>
+
+Global flags from [Overview](/reference/skills/overview/) also apply.

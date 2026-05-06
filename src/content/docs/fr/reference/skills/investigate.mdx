@@ -1,0 +1,52 @@
+---
+title: /investigate
+description: "Lancer une investigation de cause racine sur une ressource défaillante ou suspecte — collecte un bundle initial et instruit l'agent."
+---
+
+Le Skill `/investigate` est le point d'entrée pour faire intervenir un agent dans le triage d'un problème en cours. Lors de son invocation, le Skill collecte un bundle initial de données à utiliser comme contexte (ex. specs, statuts courants et précédents des conteneurs, événements sur les ressources problématiques) et instruit l'agent sur ce qui est disponible et comment aborder l'investigation.
+
+Ensuite, vous pouvez poser des questions de suivi en langage naturel et l'agent décide de répondre depuis ce qu'il a déjà, de récupérer de nouvelles données, ou de faire appel à un autre outil.
+
+```text
+/investigate                             # prompts for a target
+/investigate pod/checkout-7c9            # explicit kind/name
+/investigate the api deployment          # natural-language target
+/investigate why is checkout crashing    # natural-language + intent
+```
+
+Les cibles et le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads) sont pris en charge (voir [Overview](/fr/reference/skills/overview/)).
+
+---
+
+## Ce qu'il collecte
+
+:::note[Bundle initial]
+- Spec et statut des ressources problématiques
+- Événements sur les ressources problématiques et leurs propriétaires (`ReplicaSet` et `Deployment` d'un `Pod`, `CronJob` d'un `Job`, etc.)
+- Logs des conteneurs courants et, lorsque présent, du précédent (`--previous`) — tronqués aux lignes les plus susceptibles de contenir l'échec
+- Ressources associées évidentes : `Service` de support, `ConfigMap`s et `Secret`s montés (noms uniquement, jamais le contenu), `PVC`s liés, `ServiceAccount` référencé
+- Le nœud sur lequel les pods problématiques sont schedulés, lorsque pertinent — conditions, capacité et présence de pression
+:::
+
+Sources : API Kubernetes uniquement.
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Le Skill instruit l'agent sur la meilleure façon d'aborder une investigation :
+
+- Comment lire le bundle de données et quels signaux tendent à pointer vers quoi (codes de sortie, raisons d'événements, combinaisons d'états courantes).
+- Que les questions de suivi nécessitant l'état courant doivent faire l'objet d'une nouvelle récupération plutôt que de raisonner sur le bundle (potentiellement périmé).
+- Qu'une surveillance ciblée des événements est disponible lorsque la situation justifie une observation continue.
+- Quand déléguer à un Skill voisin : [`/logs`](/fr/reference/skills/logs/) pour un tail en direct, [`/exec`](/fr/reference/skills/exec/) pour un shell, [`/metrics`](/fr/reference/skills/metrics/) pour l'utilisation des ressources dans le temps.
+
+Une fois ce contexte chargé, le reste de la session est une conversation ordinaire — posez vos questions quelle que soit la forme que prend le problème.
+
+---
+
+## Options
+
+`/investigate` ne prend aucun flag spécifique au Skill. Affinez les logs, la fenêtre temporelle ou les ressources en langage naturel dans le prompt ou dans une question de suivi.
+
+Les flags globaux de [Overview](/fr/reference/skills/overview/) s'appliquent.

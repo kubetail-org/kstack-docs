@@ -1,0 +1,44 @@
+---
+title: Overview
+description: "Conventions communes à toutes les Skills kstack — arguments en langage naturel et flags globaux."
+---
+
+Cette page décrit les éléments communs à toutes les Skills.
+
+## Arguments en langage naturel
+
+Sauf indication contraire sur la page d'un Skill, tout ce que vous tapez après le nom du Skill est transmis à l'agent comme instruction libre. Pas besoin de mémoriser une grammaire — décrivez simplement ce que vous voulez.
+
+```text
+> /cluster-status only pods
+> /investigate backend server keeps crashing
+> /logs errors from the last hour on api pods
+> /audit-outdated container images in kube-system
+```
+
+L'agent résout l'intention, sélectionne les bonnes ressources et affine la portée en conséquence. Les flags (ci-dessous) fonctionnent toujours si vous préférez être explicite — combinez-les librement.
+
+## Contexte K8s
+
+Par défaut, les Skills utilisent le contexte par défaut de votre `kubeconfig`, sauf instruction contraire. Vous pouvez changer de contexte en langage naturel et kstack retiendra votre choix pour le reste de la session :
+
+```text
+> /cluster-status
+[ ... ]
+> redo with prod
+[ ... ]
+```
+
+## Flags globaux
+
+Ces flags sont pris en charge par toutes les Skills :
+
+<dl>
+  <dt>`--context <ctx>`</dt>
+  <dd>Remplacer le contexte kubeconfig courant</dd>
+
+  <dt>`--help`</dt>
+  <dd>Ouvrir la page de référence du Skill dans votre navigateur</dd>
+</dl>
+
+D'autres flags seront ajoutés ici au fil du temps. Lorsqu'une page de Skill documente ses propres flags, les flags globaux restent disponibles en complément.

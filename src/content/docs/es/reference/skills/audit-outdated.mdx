@@ -1,0 +1,106 @@
+---
+title: /audit-outdated
+description: 'Componentes del cluster desactualizados, CVEs conocidos y actualizaciones de versión disponibles.'
+---
+
+El Skill `/audit-outdated` busca desvíos de versión en cada capa del cluster: plano de control, nodes, imágenes de contenedor, charts de Helm, CRDs, operadores y la superficie de API a la que apuntan tus manifiestos. Cada capa tiene su propia noción de "más reciente" y sus propias tolerancias de desvío.
+
+Ejecútela sin argumentos para un barrido completo, o nombre un workflow para delimitar el reporte.
+
+```text
+/audit-outdated            # full sweep
+/audit-outdated images     # single workflow
+/audit-outdated cves in kube-system
+```
+
+La delimitación en lenguaje natural (namespaces, selectores de etiquetas, umbrales de severidad) está disponible en todos los workflows (consulte [Descripción general](/es/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. Desvío de versión de Kubernetes
+
+:::note[Verificaciones]
+- Minor del plano de control vs. el último patch en ese minor
+- Versión de `kubelet` en cada node vs. el minor del plano de control
+- Distancia hasta EOL según la matriz de soporte oficial de Kubernetes
+:::
+
+Fuentes: el [calendario de releases de Kubernetes](https://kubernetes.io/releases/) publicado.
+
+### 2. Versiones de API obsoletas y eliminadas
+
+:::note[Verificaciones]
+- Objetos activos que usan versiones de API obsoletas en el minor actual o eliminadas en el siguiente
+- Webhooks de admisión y CRDs registrados contra versiones obsoletas de `apiextensions.k8s.io`
+:::
+
+Fuentes: [`pluto`](https://github.com/FairwindsOps/pluto) y [`kubent`](https://github.com/doitintl/kube-no-trouble) cuando están disponibles, con el [calendario de obsolescencia de la API de Kubernetes](https://kubernetes.io/docs/reference/using-api/deprecation-guide/) publicado como alternativa.
+
+### 3. Frescura de imágenes de contenedor
+
+:::note[Verificaciones]
+- Tags fijados por debajo del semver más alto disponible en el registro fuente
+- Tags flotantes (`:latest`, sin versión), reportados por separado ya que "desactualizado" no está definido
+- Desvío de digest — mismo tag, digest más reciente en el upstream
+- Antigüedad de la imagen base cuando la imagen tiene un SBOM adjunto
+:::
+
+Fuentes: Docker Hub, GHCR, quay.io y gcr.io. Actualmente no se admiten registros privados.
+
+### 4. Charts y releases de Helm
+
+:::note[Verificaciones]
+- Versiones de chart instaladas vs. la más reciente en el repositorio configurado
+- Dependencias de subchart declaradas en `Chart.yaml` vs. versiones upstream
+- Charts marcados `deprecated: true` en el upstream
+:::
+
+Fuentes: los índices de los repositorios Helm configurados. Los charts alojados en OCI se leen directamente desde el registro OCI.
+
+### 5. Operadores, CRDs y sus controladores
+
+:::note[Verificaciones]
+- Versiones de operadores vs. releases upstream
+- Señalar CRDs asignados a controladores desactualizados
+:::
+
+Fuentes: reutiliza los datos del registro y del repositorio Helm de los workflows 3 y 4.
+
+### 6. Vulnerabilidades conocidas
+
+:::note[Verificaciones]
+- CVEs en imágenes de contenedor en ejecución
+- CVEs en la propia versión de Kubernetes
+:::
+
+Fuentes: [Trivy](https://github.com/aquasecurity/trivy) y el [feed oficial de CVEs de Kubernetes](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/).
+
+### 7. OS y kernel del Node
+
+:::note[Verificaciones]
+- Imagen del OS del node vs. el release actual de la distribución (p. ej. Ubuntu, Amazon Linux)
+- Versión del kernel contra CVEs publicados
+:::
+
+Fuentes: feeds de releases de la distribución para las últimas versiones publicadas de OS y kernel, y el [catálogo CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) para escalar CVEs de kernel activamente explotados.
+
+---
+
+## Frescura de los datos
+
+Cada reporte incluye un pie de página de "antigüedad de los datos": cuándo se actualizó por última vez cada índice (Trivy DB, repos de Helm, listas de tags de registros, calendario de releases de Kubernetes).
+
+---
+
+## Qué se le indica al agente
+
+Más allá de los workflows, el Skill orienta al agente sobre cómo reportar:
+
+- Incluir siempre el pie de página de antigüedad de datos — los índices desactualizados producen hallazgos desactualizados, y el lector necesita saberlo.
+- Deduplicar por digest de imagen para que una imagen desactualizada compartida entre muchos pods no domine el reporte.
+- Incluir la severidad y el estado en el catálogo CISA KEV para las entradas de CVE cuando estén disponibles; situar los hallazgos KEV por encima de los de CVSS-high sin explotación conocida.
+- Distinguir explícitamente "desvío dentro de la ventana de soporte" de "EOL" — el primero es rutinario, el segundo es urgente.
+- Para registros no incluidos en la lista de compatibles (workflow 3), indicarlo en lugar de omitir la imagen silenciosamente.
+- Derivar a [`/investigate`](/es/reference/skills/investigate/) cuando el foco sea la imagen desactualizada de un workload específico.

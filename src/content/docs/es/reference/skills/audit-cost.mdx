@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: Desperdicio de recursos y recomendaciones de dimensionamiento correcto (right-sizing).
+---
+
+El Skill `/audit-cost` busca workloads sobreaprovisionados.
+
+Ejecútela sin argumentos para un barrido completo, o nombre un workflow para delimitar el reporte.
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+La delimitación en lenguaje natural (namespaces, selectores de etiquetas, nombres de workloads) está disponible en todos los workflows (consulte [Descripción general](/es/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. Solicitudes de CPU y memoria vs. uso real
+
+:::note[Verificaciones]
+- Contenedores donde `resources.requests` es significativamente mayor que el uso p95 observado
+- Contenedores sin ningún `resources.requests` configurado
+- Contenedores que alcanzan su límite de memoria (OOMKills en la ventana de tiempo)
+:::
+
+Fuentes: `metrics-server` para uso en vivo, y Prometheus cuando se detecta para p95 histórico.
+
+### 2. Workloads inactivos
+
+:::note[Verificaciones]
+- Deployments y StatefulSets con tráfico cero y CPU casi nula durante la ventana de tiempo
+- Jobs y CronJobs que llevan suficiente tiempo fallando o suspendidos como para haberse olvidado
+:::
+
+Fuentes: `metrics-server` y la API de Kubernetes para el estado de Job/CronJob.
+
+### 3. Almacenamiento y balanceadores de carga sin uso
+
+:::note[Verificaciones]
+- PersistentVolumes en estado `Released`, y PVCs vinculados pero no montados por ningún pod
+- Objetos `Service` de tipo `LoadBalancer` sin endpoints
+:::
+
+Fuentes: API de Kubernetes.
+
+---
+
+## Ventana de tiempo
+
+El ajuste de capacidad requiere historial. Por defecto, el Skill analiza los últimos 7 días cuando Prometheus está disponible, y cae de vuelta a la instantánea en vivo de `metrics-server` cuando no lo está. El reporte siempre indica qué fuente se usó y qué tan atrás llegan los datos.
+
+---
+
+## Qué se le indica al agente
+
+Más allá de los workflows en sí, el Skill orienta al agente sobre cómo reportar:
+
+- Indicar la fuente (`metrics-server` para datos en vivo, Prometheus para historial) y el período de análisis efectivo en el encabezado — la retención de Prometheus puede ser menor que los 7 días por defecto.
+- Marcar los hallazgos que requieren Prometheus como "no disponible" cuando solo está presente `metrics-server`, en lugar de descartarlos silenciosamente.
+- Señalar solo las brechas entre solicitudes y uso que sean suficientemente grandes como para importar en la práctica; los deltas pequeños son ruido.
+- Derivar a [`/metrics`](/es/reference/skills/metrics/) cuando el usuario quiera ver las series de datos subyacentes para un workload específico.

@@ -1,0 +1,114 @@
+---
+title: /exec
+description: "Shell guidé par IA dans un conteneur de pod, un nœud ou un conteneur de débogage éphémère — partagé avec l'agent via tmux."
+---
+
+Le Skill `/exec` est une version assistée par IA de `kubectl exec`. Décrivez la cible en langage naturel et l'agent choisit le bon mécanisme : un `exec` classique dans un conteneur en cours d'exécution, un conteneur de débogage éphémère lorsque la cible n'a pas de shell utilisable, ou un shell privilégié sur un nœud.
+
+La session s'exécute dans une fenêtre **tmux** à laquelle vous et l'agent êtes attachés simultanément. Vous pouvez saisir des commandes, l'agent aussi, et vous voyez tous deux la sortie en temps réel.
+
+```text
+/exec                              # prompts for a target
+/exec api                          # shell into the api pod (container auto-picked)
+/exec api/sidecar                  # shell into a specific container
+/exec node worker-3                # root shell on a node
+/exec debug api                    # ephemeral debug container alongside api
+```
+
+Le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads) est pris en charge (voir [Overview](/fr/reference/skills/overview/)).
+
+:::note[Invoqué par l'utilisateur uniquement]
+`/exec` est livré avec `disable-model-invocation: true` — l'agent ne démarrera jamais un shell de sa propre initiative. Le Skill s'exécute uniquement lorsque vous tapez explicitement `/exec`. Ce comportement est délibéré étant donné les modes privilégiés décrits ci-dessous.
+:::
+
+:::caution[Sécurité]
+`/exec` ouvre un shell interactif dans lequel vous et l'agent peuvent saisir des commandes. Les modes Node et debug-container créent des pods privilégiés avec accès au niveau de l'hôte (`hostPID`, `hostNetwork`, système de fichiers hôte monté sur `/host`). Tout ce qui est visible dans le volet — y compris tout secret que vous y collez, les variables d'environnement et la sortie des commandes — est lu par l'agent et peut être envoyé au modèle. Voir [Sécurité](/fr/concepts/security/) pour le modèle de confiance complet.
+:::
+
+---
+
+## Prérequis
+
+`tmux` doit être installé et disponible dans `$PATH`. Le Skill ne fonctionnera pas sans lui.
+
+---
+
+## Modes
+
+L'agent résout la cible depuis votre description et choisit l'un des modes suivants.
+
+### 1. Conteneur de pod (par défaut)
+
+Mode par défaut pour un pod en cours d'exécution disposant d'un shell utilisable. Équivalent à `kubectl exec -it <pod> -c <container> -- <shell>`, avec le conteneur sélectionné automatiquement lorsque le pod n'en a qu'un ou lorsqu'un est manifestement le principal.
+
+:::note[Comportement]
+- Shell détecté automatiquement (`bash`, puis `sh`, puis `ash`)
+- Conteneur inféré depuis la spec du pod sauf spécification explicite `<pod>/<container>`
+- Repli automatique sur le mode conteneur de débogage si aucun shell n'est disponible
+:::
+
+### 2. Conteneur de débogage
+
+Déclenché automatiquement lorsque le conteneur cible est distroless, scratch ou sans shell — ou explicitement via `/exec debug <pod>`. Équivalent à `kubectl debug -it <pod> --target=<container> --image=<toolbox>`, partageant l'espace de noms de processus de la cible pour inspecter son système de fichiers via `/proc/<pid>/root` et son réseau depuis le même netns.
+
+:::note[Comportement]
+- Partage l'espace de noms de processus avec le conteneur cible
+- Le système de fichiers de la cible est visible dans `/proc/1/root`
+- Utilise `nicolaka/netshoot` par défaut (remplaçable avec `--image`)
+:::
+
+### 3. Node
+
+Shell root privilégié sur un nœud, pour le débogage au niveau de l'hôte (logs kubelet, `journalctl`, `crictl`, espaces de noms réseau). Implémenté comme un pod privilégié de courte durée schedulé sur le nœud cible avec `hostPID`, `hostNetwork` et le système de fichiers hôte monté sur `/host`.
+
+:::note[Comportement]
+- Pod créé dans le namespace « default » (sauf indication contraire)
+- Pod supprimé lorsque l'utilisateur en demande la suppression à l'agent
+- Utilise `nicolaka/netshoot` par défaut
+:::
+
+---
+
+## Ouverture de la session
+
+Une fois que l'agent a résolu la cible et lancé la commande `exec` ou `debug` sous-jacente, il :
+
+1. Démarre une session tmux détachée avec un nom descriptif (ex. `kstack-exec-api-server`).
+2. Tente d'ouvrir une nouvelle fenêtre de terminal sur votre bureau et d'y attacher la session — pour que le shell apparaisse directement devant vous.
+3. Affiche la commande `tmux attach` exacte dans le chat, pour que vous puissiez vous connecter manuellement depuis n'importe quel terminal (utile via SSH, dans un éditeur distant, ou si l'ouverture de fenêtre échoue).
+
+```text
+Session ready.
+  Target: pod/api-5f9c-bnt4m (container: server)
+  tmux:   tmux attach -t kstack-exec-api-server
+```
+
+Vous et l'agent partagez le même volet. Chacun peut saisir des commandes ; les deux voient la sortie complète. Pour économiser des tokens, l'agent lit la fenêtre de façon conservatrice — vous devrez peut-être le relancer pour qu'il prenne en compte les dernières modifications. Dites à l'agent de fermer la session et il supprimera le pod qu'il a créé.
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Au-delà du démarrage de la session, le Skill instruit l'agent sur le comportement à adopter à l'intérieur :
+
+- Choisir le mode le moins privilégié permettant de répondre à la question — exec classique avant conteneur de débogage, conteneur de débogage avant shell sur nœud. Escalader uniquement lorsque le mode actuel ne peut pas voir ce que l'utilisateur demande.
+- Lire le volet tmux de façon conservatrice pour économiser des tokens ; inviter l'utilisateur à faire défiler plutôt que relire un grand buffer sans y être invité.
+- Traiter tout ce qui est visible dans le volet (variables d'environnement, sortie des commandes, texte collé) comme potentiellement sensible — ne pas le répercuter dans le chat sauf si l'utilisateur le demande.
+- Lorsque l'utilisateur signale qu'il a terminé, fermer la session : quitter le shell, tuer la session tmux et supprimer tout pod créé par le Skill (conteneurs de débogage, pods de shell sur nœud).
+
+---
+
+## Options
+
+<dl>
+  <dt>`--image <image>`</dt>
+  <dd>Image à utiliser pour les modes node et debug-container (par défaut <code>netshoot</code>).</dd>
+
+  <dt>`--attach`</dt>
+  <dd>Attacher l'agent à une session tmux kstack existante plutôt qu'en démarrer une nouvelle.</dd>
+
+  <dt>`--detach`</dt>
+  <dd>Démarrer une nouvelle session en mode détaché — aucune fenêtre de terminal n'est ouverte, connexion manuelle requise.</dd>
+</dl>
+
+Les flags globaux de [Overview](/fr/reference/skills/overview/) s'appliquent également.

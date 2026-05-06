@@ -1,0 +1,50 @@
+---
+title: /forget
+description: Lokalen Cache von kstack löschen und das Gelernte über deine(n) Cluster verwerfen.
+---
+
+Der `/forget`-Skill löscht den lokalen Zustand von kstack auf deinem Rechner. Mit der Zeit baut kstack ein Arbeitsgedächtnis deiner Cluster auf — aktuelle Abfrageergebnisse, erkannte Integrationen, Ressourcen-Fingerprints und Baselines zur Anomalie-Erkennung. Dieser Skill erzwingt das Löschen dieser Daten, damit der Agent von vorne beginnen kann.
+
+Dieser Skill berührt nichts im Cluster. Zum Entfernen kstack-verwalteter Ressourcen aus dem Cluster selbst, siehe [`/cleanup`](/de/reference/skills/cleanup/).
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[Nur vom Benutzer ausgeführt]
+`/forget` wird mit `disable-model-invocation: true` ausgeliefert. Der Agent löscht niemals eigenständig den lokalen Zustand — er wird nur ausgeführt, wenn du explizit `/forget` eingibst, damit gecachter Kontext nicht unerwartet verloren geht.
+:::
+
+---
+
+## Was es löscht
+
+Der Zustand liegt unter `~/.config/kstack/`, partitioniert pro kubeconfig-Kontext — das Vergessen von `staging` wirkt sich nie auf `prod` aus.
+
+:::note[Lokaler Zustand]
+- **Cache** (`~/.config/kstack/cache/<context>/`) — aktuelle Abfrageergebnisse, Log-Buffer, Dedup-Tabellen, In-Flight-Watcher-Zustand. Günstig wieder aufzubauen; frei löschbar.
+- **Gelernter Zustand** (`~/.config/kstack/state/<context>/`) — erkannte Integrationen, Ressourcen-Fingerprints, Baselines, Cluster-spezifische Präferenzen. Wird bei der nächsten Nutzung wieder aufgebaut, kann aber einige Interaktionen dauern, bis er vollständig wiederhergestellt ist.
+:::
+
+Standardmäßig löscht der Skill beides für den aktuellen Kontext.
+
+---
+
+## Wann ausführen
+
+- Der Cluster wurde neu aufgebaut oder migriert und seine alte Identität stimmt nicht mehr mit dem überein, was kstack kennt.
+- Du möchtest, dass kstack von Grund auf neu lernt — Baselines fühlen sich veraltet an oder eine frühere Session hat ihm etwas Falsches beigebracht.
+- Du gibst den Rechner weiter und möchtest keinen Cluster-spezifischen Zustand zurücklassen.
+
+---
+
+## Optionen
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>Cache und gelernten Zustand für jeden Kontext löschen, nicht nur den aktuellen</dd>
+</dl>
+
+Globale Flags aus [Übersicht](/de/reference/skills/overview/) gelten ebenfalls.

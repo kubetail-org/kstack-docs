@@ -1,0 +1,112 @@
+---
+title: /cluster-status
+description: Um snapshot denso de saúde do cluster — condições de node, agregados de pod e uma lista classificada dos problemas que realmente importam.
+---
+
+O Skill `/cluster-status` produz um único snapshot denso de saúde do cluster: detalhes gerais do cluster, quantos nodes e pods estão saudáveis, e uma lista classificada curta do que não está. É somente leitura e nunca muta o estado do cluster.
+
+A saída é deliberadamente limitada (~10 linhas independentemente do tamanho do cluster) para que a primeira resposta seja barata de ler e de o modelo regenerar. O detalhe completo por node e por pod é escrito em um cache JSON local que o agent lê nas perguntas de acompanhamento, sem precisar consultar a API novamente.
+
+```text
+/cluster-status                    # snapshot (uses cache if fresh)
+/cluster-status --refresh          # force a fresh fetch
+/cluster-status --ttl 1h           # only re-fetch if older than 1h
+```
+
+Este Skill não aceita argumentos posicionais. Perguntas de acompanhamento ("listar pods", "quais nodes estão com taint", "pods no worker-3") são respondidas a partir do cache — veja [Acompanhamentos](#acompanhamentos) abaixo.
+
+---
+
+## O que coleta
+
+:::note[Bundle inicial]
+- **Metadados do cluster** (`cluster.json`) — nome do contexto, versão do Kubernetes e plataforma (EKS, GKE, kind, etc.), via `kubectl version` e `kubectl cluster-info`.
+- **Lista de nodes** (`nodes.json`) — labels, taints, condições (`Ready`, `MemoryPressure`, `DiskPressure`, `PIDPressure`, `SchedulingDisabled`), capacidade, alocável e papel de control-plane vs. worker de cada node.
+- **Lista de pods** (`pods.json`) — todos os pods em todos os namespaces, incluindo fase, condição `Ready`, status dos containers, contagens de reinicialização, owner references e o node em que cada pod está agendado.
+:::
+
+Fontes: apenas a API do Kubernetes — `kubectl version`, `kubectl get nodes -o json` e `kubectl get pods -A -o json`, em paralelo. Os três arquivos são escritos em um diretório de cache por contexto e reutilizados nos acompanhamentos dentro da janela TTL.
+
+---
+
+## O que verifica
+
+:::note[Verificações]
+- Identidade do cluster — nome do contexto, versão do Kubernetes e plataforma (EKS, GKE, kind, etc.)
+- Status `Ready` do node, condições `MemoryPressure` / `DiskPressure` / `PIDPressure`, `SchedulingDisabled`, e divisão control-plane vs. worker
+- Fase e condição `Ready` dos pods em todos os namespaces, mais pods com contagens de reinicialização não-zero
+- Uma lista classificada de principais problemas (top 5 por severidade, com um "…e mais N" quando o cluster tem muita coisa errada)
+:::
+
+Fontes: apenas a API do Kubernetes — `kubectl version`, `kubectl get nodes` e `kubectl get pods -A`, em paralelo.
+
+---
+
+## Como funciona
+
+O Skill busca as três listas concorrentemente e escreve cada uma em um diretório de cache por contexto como `cluster.json`, `nodes.json` e `pods.json`. Agregação e classificação por severidade acontecem no lado do cliente sobre esse JSON, de modo que execuções repetidas dentro da janela TTL ignoram completamente a API.
+
+O bloco de resumo tem este formato:
+
+```text
+Cluster: prod-us-east · Kubernetes v1.30.4 · EKS
+
+Nodes  12/12 Ready · 1 pressure · 0 unschedulable · 3 control-plane, 9 worker
+Pods   184/187 Ready · 4 pod(s) with restarts
+
+Issues (6):
+  payments/checkout-7c9  CrashLoopBackOff  17 restarts in 42m
+  ingress/nginx-0        MemoryPressure    node ip-10-0-3-14
+  ...                                      (top 5 by severity)
+  …and 1 more
+
+Snapshot cached (TTL 15m). Ask to drill in — e.g. "list nodes", "list pods", "pods on <node>", "which nodes are tainted".
+```
+
+O bloco `Issues` é omitido quando o cluster está limpo. O rodapé informa se o snapshot foi obtido recentemente ou servido do cache, e a idade dos dados em cache.
+
+---
+
+## Acompanhamentos
+
+O resumo omite deliberadamente as tabelas por node e por pod para que a resposta inicial permaneça pequena. Quando você pede para vê-las — ou faz qualquer pergunta que possa ser respondida a partir dos três arquivos JSON em cache — o agent lê o cache com `jq` em vez de re-executar o Skill:
+
+```text
+❯ /cluster-status
+[ summary... ]
+
+❯ list pods
+[ full pod table, rendered from pods.json ]
+
+❯ which pods are on ip-10-0-3-14?
+[ filtered from pods.json ]
+```
+
+Para dados que não estão no cache (events, logs, YAML de um recurso específico), o agent roteia para o Skill certa — [`/events`](/pt/reference/skills/events/), [`/logs`](/pt/reference/skills/logs/) ou [`/investigate`](/pt/reference/skills/investigate/) — em vez de ampliar o `/cluster-status`.
+
+Diga "atualizar" / "buscar novamente" / "verificar de novo" e o agent re-invoca o Skill com `--refresh`.
+
+---
+
+## O que o agent é instruído
+
+Além de buscar as três listas, o Skill orienta o agent sobre como se comportar nos acompanhamentos:
+
+- Preferir responder a partir do `cluster.json` / `nodes.json` / `pods.json` em cache com `jq` em vez de re-invocar o Skill — o cache é o objetivo do resumo limitado.
+- Re-invocar com `--refresh` apenas quando o usuário pedir ou quando o acompanhamento for claramente sensível ao tempo ("o node já se recuperou?").
+- Manter o resumo curto — rotear pedidos de detalhes (tabelas completas, drill-downs por node) para leituras do cache em vez de crescer o bloco de resumo.
+- Encaminhar para [`/events`](/pt/reference/skills/events/), [`/logs`](/pt/reference/skills/logs/) ou [`/investigate`](/pt/reference/skills/investigate/) para qualquer coisa que não esteja nos três arquivos em cache, em vez de ampliar este Skill.
+
+---
+
+## Opções
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>Ignora o cache e busca dados frescos da API.</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>Só re-busca se o snapshot em cache for mais antigo que isso (estilo kubectl: <code>5m</code>, <code>1h</code>, <code>24h</code>). Padrão: <code>15m</code>. Ignorado quando <code>--refresh</code> está definido.</dd>
+</dl>
+
+Sinalizadores globais de [Visão geral](/pt/reference/skills/overview/) também se aplicam.

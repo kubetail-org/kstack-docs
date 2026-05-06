@@ -1,0 +1,50 @@
+---
+title: /forget
+description: 'Borra el caché local de kstack y descarta lo que aprendió sobre su(s) cluster(s).'
+---
+
+El Skill `/forget` borra el estado local de kstack en su máquina. Con el tiempo, kstack acumula una memoria de trabajo de sus clusters — resultados de consultas recientes, integraciones detectadas, huellas digitales de recursos y baselines que usa para detectar anomalías. Este Skill fuerza el borrado de esos datos para que el agente pueda comenzar con un estado limpio.
+
+Este Skill no toca nada en el cluster. Para eliminar recursos gestionados por kstack del propio cluster, consulte [`/cleanup`](/es/reference/skills/cleanup/).
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[Solo invocado por el usuario]
+`/forget` se distribuye con `disable-model-invocation: true`. El agente nunca borrará el estado local por sí solo — solo se ejecuta cuando usted escribe explícitamente `/forget`, para que no pierda contexto en caché de forma inesperada.
+:::
+
+---
+
+## Qué borra
+
+El estado se encuentra bajo `~/.config/kstack/`, particionado por contexto de kubeconfig — olvidar `staging` nunca afecta a `prod`.
+
+:::note[Estado local]
+- **Caché** (`~/.config/kstack/cache/<context>/`) — resultados de consultas recientes, buffers de log, tablas de deduplicación, estado en vuelo de watcher. Barato de reconstruir; se borra libremente.
+- **Estado aprendido** (`~/.config/kstack/state/<context>/`) — integraciones detectadas, huellas digitales de recursos, baselines, preferencias por cluster. Se reconstruye en el próximo uso, pero puede tomar algunas interacciones reformarse completamente.
+:::
+
+Por defecto, el Skill borra ambos para el contexto actual.
+
+---
+
+## Cuándo ejecutarla
+
+- El cluster fue reconstruido o migrado y su identidad anterior ya no coincide con lo que kstack recuerda.
+- Quiere que kstack vuelva a aprender desde cero — los baselines se sienten desactualizados, o una sesión anterior le enseñó algo incorrecto.
+- Está entregando la máquina y no quiere dejar ningún estado específico del cluster.
+
+---
+
+## Opciones
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>Borrar caché y estado aprendido para todos los contextos, no solo el actual.</dd>
+</dl>
+
+También se aplican los flags globales de [Descripción general](/es/reference/skills/overview/).

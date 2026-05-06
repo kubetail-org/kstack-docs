@@ -1,0 +1,81 @@
+---
+title: /audit-network
+description: NetworkPolicy、Service、Ingress、Gateway API、DNS 和加密健全性检查。
+---
+
+`/audit-network` 技能用于检测集群网络中损坏或缺失的部分：不匹配任何资源的 `NetworkPolicy`、没有端点的 `Service`、无法解析的 `Ingress` 和 `GatewayAPI` 路由、DNS 问题，以及在 Service Mesh 可用时仍以明文通信的工作负载。
+
+不带参数运行可进行全面扫描，也可指定工作流名称以限定报告范围。
+
+```text
+/audit-network                         # full sweep
+/audit-network policies                # single workflow
+/audit-network ingress in prod
+```
+
+每个工作流均支持自然语言范围限定（命名空间、标签选择器、工作负载名称），参见[概述](/zh-cn/reference/skills/overview/)。
+
+---
+
+## 工作流
+
+### 1. NetworkPolicy
+
+:::note[检查]
+- 没有默认拒绝策略的命名空间，以及未被任何策略覆盖的 Pod
+- `podSelector` 或对等选择器与任何 Pod 或命名空间均不匹配的策略
+- 引用目标 Pod 未暴露的端口或协议的规则
+:::
+
+数据来源：Kubernetes API。
+
+### 2. Service
+
+:::note[检查]
+- 就绪端点为零的 Service
+- `selector` 与 Pod 标签不匹配，以及 `port` 与 `targetPort` 不匹配
+- 无头 Service（`clusterIP: None`）未关联任何 StatefulSet
+:::
+
+数据来源：Kubernetes API。
+
+### 3. Ingress 和 GatewayAPI
+
+:::note[检查]
+- 跨 Ingress 或 Gateway 路由的主机名冲突
+- TLS 条目引用不存在或已过期的 Secret
+- 后端指向不存在或没有端点的 Service
+:::
+
+数据来源：Kubernetes API；当 `gateway.networking.k8s.io` CRD 已安装时一并纳入。
+
+### 4. DNS
+
+:::note[检查]
+- CoreDNS Pod 健康状态及近期重启情况
+- CoreDNS 指标中 NXDOMAIN 或 SERVFAIL 率升高
+- CoreDNS ConfigMap 中无法解析的存根域和转发器
+:::
+
+数据来源：CoreDNS `Deployment`、其 `ConfigMap` 及其 Prometheus 指标（若已暴露）。
+
+### 5. 加密和 mTLS
+
+:::note[检查]
+- 不在 Service Mesh sidecar 或 ambient 覆盖范围内的工作负载
+- 处于宽松模式（允许明文）的命名空间或工作负载
+:::
+
+数据来源：Istio、Linkerd 或 Cilium CRD — 仅在检测到其中一种 Service Mesh 时运行。
+
+---
+
+## 代理收到的指引
+
+除工作流外，技能还向代理说明如何限定范围和报告：
+
+- 除非相关 CRD 已安装，否则跳过 Service Mesh 和 Gateway API 工作流 — 不存在不构成发现。
+- TLS 检查时，若因 RBAC 无法读取 Secret 内容，注明原因而非误报为"已过期"。
+- DNS 主动探测检查时，说明探测来源（用于解析的集群内 Pod），以便正确解读失败原因。
+- 按工作流分组列出发现，并附上证据（选择器、端点、ConfigMap 键），而非仅给出结论。
+- CoreDNS 日志转交给 [`/logs`](/zh-cn/reference/skills/logs/)；若单个工作负载是根因，转交给 [`/investigate`](/zh-cn/reference/skills/investigate/)。

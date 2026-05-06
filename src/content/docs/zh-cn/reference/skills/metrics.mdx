@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: 通过自然语言以只读方式获取 Pod、节点和工作负载的 CPU、内存及其他资源指标。
+---
+
+`/metrics` 技能是 AI 驱动的指标获取工具。描述你想查看的内容，代理会解析正确的目标、选择合理的时间窗口并返回紧凑摘要。该技能只读，永远不会改变集群状态。
+
+调用 `/metrics` 技能时，代理被指示查询 `metrics-server` 获取实时数据、查询 Prometheus 获取历史数据。若所需工具不可用，代理会主动提议为你安装。技能还提供数据展示规范，确保输出有界且对模型处理高效。
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+支持自然语言范围限定（命名空间、标签选择器、工作负载名称、时间窗口、指标名称），参见[概述](/zh-cn/reference/skills/overview/)。代理将你的描述转换为对可用数据源的合适查询。
+
+---
+
+## 数据来源
+
+按查询优先顺序：
+
+- **`metrics-server`** — 通过 `kubectl top` 获取实时快照。若 Prometheus 不可用，任何查询均回退到此来源，并在输出中注明答案是时间点样本而非时间窗口数据。
+- **Prometheus** — 代理检测到集群内 Prometheus 且问题涉及时间窗口时使用。通过集群内服务以 PromQL 查询。
+
+该技能不直接抓取 Exporter，也不从集群外部读取指标端点（如 DataDog、Grafana Cloud）。
+
+---
+
+## 代理收到的指引
+
+除指示代理从何处获取数据外，技能还说明如何行事：
+
+- 当问题涉及时间窗口时，优先使用 Prometheus 而非 `metrics-server`；回退到 `metrics-server` 时，将输出标记为 `source: metrics-server`，避免误导读者对时间窗口的理解。
+- 报告摘要统计数据（p50、p95、max），而非将完整时序数据传入模型。
+- 若已解析的查询覆盖的 Pod 数量或时间窗口远超用户可能预期，显示已解析的查询并在执行前询问。
+- 将嵌入租户 ID、用户 ID 或路径段的标签集标注为潜在敏感内容；除非用户明确要求，否则不将这些标签回显到聊天中。
+- 按下方[交接](#交接)部分的规则路由，而非将该技能扩展为通用可观测性工具。
+
+---
+
+## 安全
+
+`/metrics` 只读。它仅对你描述的目标执行 `kubectl top` 和 Prometheus 范围查询 — 无 exec、无写入、不访问 Pod 内容或日志。若描述解析出的 Pod 数量或时间窗口超出你的预期，代理会显示已解析的查询并在执行前询问。
+
+指标值本身很少包含敏感数据，但标签集可以 — 嵌入租户 ID、用户 ID 或路径段的自定义指标名称或标签，会像日志行一样进入代理上下文。将查询范围限定在你关心的工作负载上，而非使用宽泛的通配符。完整信任模型参见[安全](/zh-cn/concepts/security/)。
+
+---
+
+## 交接
+
+对于资源使用之外的任何内容，代理路由到相邻技能而非扩大 `/metrics`：
+
+- [`/logs`](/zh-cn/reference/skills/logs/) — 当你想了解 Pod CPU 或内存变化的*原因*时
+- [`/investigate`](/zh-cn/reference/skills/investigate/) — 当使用量异常是资源故障的症状，且你需要根因上下文时
+- [`/audit-cost`](/zh-cn/reference/skills/audit-cost/) — 进行完整的资源调优扫描，而非一次性检查
+
+---
+
+## 选项
+
+`/metrics` 当前不接受技能专属标志。在提示或后续问题中用自然语言指定目标、指标和时间窗口。
+
+全局标志参见[概述](/zh-cn/reference/skills/overview/)。

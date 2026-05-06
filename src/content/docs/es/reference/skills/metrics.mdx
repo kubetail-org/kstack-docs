@@ -1,0 +1,66 @@
+---
+title: /metrics
+description: 'Obtiene métricas de CPU, memoria y otros recursos para pods, nodes y workloads — mediante lenguaje natural, de solo lectura.'
+---
+
+El Skill `/metrics` es un buscador de métricas potenciado por IA. Describa lo que quiere ver y el agente resolverá el objetivo correcto, elegirá una ventana de tiempo razonable y devolverá un resumen compacto. Es de solo lectura y nunca muta el estado del cluster.
+
+Cuando se invoca el Skill `/metrics`, al agente se le instruye a consultar `metrics-server` para datos en vivo y Prometheus para historial. Si necesita una herramienta que no está disponible, el agente ofrecerá instalarla. También recibe pautas sobre cómo mostrar los datos para que la salida sea acotada y eficiente al pasarla por el modelo.
+
+```text
+/metrics                                 # prompts for a target
+/metrics api                             # current usage for the api workload
+/metrics memory on checkout last 1h      # natural-language scoping
+/metrics top pods by cpu in payments
+```
+
+La delimitación en lenguaje natural (namespaces, selectores de etiquetas, nombres de workloads, ventanas de tiempo, nombres de métricas) está disponible (consulte [Descripción general](/es/reference/skills/overview/)). El agente traduce su descripción a la consulta apropiada contra cualquier fuente disponible.
+
+---
+
+## Fuentes de datos
+
+Fuentes, en orden de preferencia según la consulta:
+
+- **`metrics-server`** — se usa para instantáneas en vivo mediante `kubectl top`. Si Prometheus no está disponible, el Skill cae de vuelta a esta para cualquier consulta e indica en la salida que la respuesta es una muestra puntual y no una ventana de tiempo.
+- **Prometheus** — se usa cuando el agente detecta un Prometheus en el cluster y la pregunta tiene una ventana de tiempo. Se consulta vía su servicio en el cluster usando PromQL.
+
+El Skill nunca hace scraping de exporters directamente, y no lee endpoints de métricas desde fuera del cluster (p. ej. DataDog, Grafana Cloud).
+
+---
+
+## Qué se le indica al agente
+
+Más allá de indicar al agente dónde obtener los datos, el Skill lo orienta sobre cómo comportarse:
+
+- Preferir Prometheus sobre `metrics-server` cuando la pregunta tiene una ventana de tiempo; caer de vuelta a `metrics-server` para instantáneas en vivo, pero etiquetar la salida `source: metrics-server` para que el lector no se confunda sobre la ventana de tiempo.
+- Reportar estadísticas de resumen (p50, p95, máx.) en lugar de pasar la serie completa por el modelo.
+- Si la consulta resuelta cubre muchos más pods o una ventana más amplia de lo que el usuario probablemente pretendía, mostrar la consulta resuelta y preguntar antes de ejecutarla.
+- Señalar los conjuntos de etiquetas que incluyen IDs de tenant, IDs de usuario o segmentos de ruta como potencialmente sensibles; no repetir esas etiquetas en el chat a menos que el usuario lo solicite explícitamente.
+- Derivar fuera de este Skill según la sección [Derivaciones](#derivaciones) en lugar de ampliarla a una herramienta de observabilidad general.
+
+---
+
+## Seguridad
+
+`/metrics` es de solo lectura. Emite consultas `kubectl top` y de rango de Prometheus contra el objetivo que describió, y nada más — sin exec, sin escrituras, sin acceso al contenido de pods ni logs. Si la descripción se resuelve a más pods o una ventana más amplia de lo que probablemente pretendía, el agente le mostrará la consulta resuelta y preguntará antes de ejecutarla.
+
+Los valores de métricas en sí rara vez contienen datos sensibles, pero los conjuntos de etiquetas sí pueden — un nombre o etiqueta de métrica personalizada que incluye un ID de tenant, ID de usuario o segmento de ruta termina en el contexto del agente de la misma forma que lo hacen las líneas de log. Delimite las consultas al workload que le interesa en lugar de usar comodines amplios. Consulte [Seguridad](/es/concepts/security/) para el modelo de confianza completo.
+
+---
+
+## Derivaciones
+
+Para cualquier cosa fuera del uso de recursos, el agente deriva a un Skill vecina en lugar de ampliar `/metrics`:
+
+- [`/logs`](/es/reference/skills/logs/) cuando quiere ver *por qué* se movió la CPU o la memoria de un pod
+- [`/investigate`](/es/reference/skills/investigate/) cuando el uso es un síntoma de un recurso fallido y quiere contexto de causa raíz
+- [`/audit-cost`](/es/reference/skills/audit-cost/) para un barrido completo de ajuste de capacidad en lugar de una verificación puntual
+
+---
+
+## Opciones
+
+`/metrics` no acepta flags específicos del Skill. Delimite el objetivo, la métrica y la ventana de tiempo mediante lenguaje natural en el prompt o en un seguimiento.
+
+Se aplican los flags globales de [Descripción general](/es/reference/skills/overview/).

@@ -1,0 +1,112 @@
+---
+title: /cluster-status
+description: 'クラスターの密なヘルススナップショット — Nodeコンディション、Pod集計、実際に重要な問題のランク付きリスト。'
+---
+
+`/cluster-status` スキルは、クラスターの単一の密なヘルススナップショットを生成します。クラスターの概要、健全なNodeとPodの数、および問題のある項目の短いランク付きリストを含みます。読み取り専用であり、クラスターの状態を変更しません。
+
+出力はクラスターサイズに関わらず約10行に意図的に抑えられているため、最初のレスポンスは読み取りコストが低く、モデルを通じた再送信コストも低いです。NodeごとおよびPodごとの完全な詳細はローカルJSONキャッシュに書き込まれ、エージェントはAPIを再呼び出しすることなくフォローアップの質問でそこから読み取ります。
+
+```text
+/cluster-status                    # snapshot (uses cache if fresh)
+/cluster-status --refresh          # force a fresh fetch
+/cluster-status --ttl 1h           # only re-fetch if older than 1h
+```
+
+このスキルは位置引数を取りません。フォローアップの質問（「Podをリスト」、「taintされているNodeはどれか」、「worker-3上のPod」）はキャッシュから回答されます — 下記の[フォローアップ](#フォローアップ)を参照してください。
+
+---
+
+## 収集内容
+
+:::note[初期バンドル]
+- **クラスターメタデータ**（`cluster.json`）— `kubectl version` および `kubectl cluster-info` からのコンテキスト名、Kubernetesバージョン、プラットフォーム（EKS、GKE、kindなど）。
+- **Nodeリスト**（`nodes.json`）— すべてのNodeのラベル、テイント、コンディション（`Ready`、`MemoryPressure`、`DiskPressure`、`PIDPressure`、`SchedulingDisabled`）、capacity、allocatable、コントロールプレーン対ワーカーロール。
+- **Podリスト**（`pods.json`）— すべてのNamespaceにわたるすべてのPod（フェーズ、`Ready` コンディション、コンテナステータス、再起動回数、オーナー参照、各Podがスケジュールされているノードを含む）。
+:::
+
+ソース：Kubernetes APIのみ — `kubectl version`、`kubectl get nodes -o json`、`kubectl get pods -A -o json` を並列でファンアウト。3つのファイルはコンテキストごとのキャッシュディレクトリに書き込まれ、TTLウィンドウ内のフォローアップで再利用されます。
+
+---
+
+## チェック内容
+
+:::note[チェック項目]
+- クラスターID — コンテキスト名、Kubernetesバージョン、プラットフォーム（EKS、GKE、kindなど）
+- Node `Ready` ステータス、`MemoryPressure` / `DiskPressure` / `PIDPressure` コンディション、`SchedulingDisabled`、コントロールプレーン対ワーカーの分割
+- すべてのNamespaceにわたるPodフェーズと `Ready` コンディション、および再起動回数がゼロでないPod
+- ランク付きトップ問題リスト（重大度による上位5件、クラスターで多くの問題がある場合は「…and N more」の末尾）
+:::
+
+ソース：Kubernetes APIのみ — `kubectl version`、`kubectl get nodes`、`kubectl get pods -A` を並列でファンアウト。
+
+---
+
+## 動作
+
+スキルは3つのリストを同時に取得し、それぞれを `cluster.json`、`nodes.json`、`pods.json` としてコンテキストごとのキャッシュディレクトリに書き込みます。集計と重大度ランキングはそのJSONに対してクライアントサイドで行われるため、TTLウィンドウ内での繰り返し実行はAPIをまったく呼び出しません。
+
+サマリーブロックの例：
+
+```text
+Cluster: prod-us-east · Kubernetes v1.30.4 · EKS
+
+Nodes  12/12 Ready · 1 pressure · 0 unschedulable · 3 control-plane, 9 worker
+Pods   184/187 Ready · 4 pod(s) with restarts
+
+Issues (6):
+  payments/checkout-7c9  CrashLoopBackOff  17 restarts in 42m
+  ingress/nginx-0        MemoryPressure    node ip-10-0-3-14
+  ...                                      (top 5 by severity)
+  …and 1 more
+
+Snapshot cached (TTL 15m). Ask to drill in — e.g. "list nodes", "list pods", "pods on <node>", "which nodes are tainted".
+```
+
+クラスターがクリーンな場合、`Issues` ブロックは省略されます。フッターにはスナップショットが新しく取得されたかキャッシュから提供されたか、およびキャッシュされたデータの経過時間が表示されます。
+
+---
+
+## フォローアップ
+
+サマリーは初期レスポンスを小さく保つために、NodeごとおよびPodごとのテーブルを意図的に省略しています。それらの表示を要求した場合、またはキャッシュされた3つのJSONファイルから回答できる他の質問をした場合、エージェントはスキルを再実行するのではなく `jq` でキャッシュを読み取ります。
+
+```text
+❯ /cluster-status
+[ summary... ]
+
+❯ list pods
+[ full pod table, rendered from pods.json ]
+
+❯ which pods are on ip-10-0-3-14?
+[ filtered from pods.json ]
+```
+
+キャッシュにないデータ（イベント、ログ、特定リソースのYAML）については、エージェントは `/cluster-status` を拡張するのではなく、適切なスキル — [`/events`](/ja/reference/skills/events/)、[`/logs`](/ja/reference/skills/logs/)、または [`/investigate`](/ja/reference/skills/investigate/) — にルーティングします。
+
+「refresh」/「fetch again」/「re-check」と言うと、エージェントは `--refresh` 付きでスキルを再実行します。
+
+---
+
+## エージェントへの指示
+
+スキルは3つのリストを取得するだけでなく、フォローアップ時の動作についてエージェントに指示します。
+
+- スキルを再実行するよりも、キャッシュされた `cluster.json` / `nodes.json` / `pods.json` に対して `jq` で回答することを優先します — サマリーをコンパクトに保てるのはキャッシュがあるからです。
+- `--refresh` 付きで再実行するのは、ユーザーが要求した場合またはフォローアップが明らかに時間依存の場合（「Nodeはもう回復しましたか？」）のみです。
+- サマリーは短く保ちます — 詳細リクエスト（完全なテーブル、Nodeごとのドリルダウン）はサマリーブロックを拡張するのではなくキャッシュ読み取りにルーティングします。
+- 3つのキャッシュされたファイルにないものについては、このスキルを拡張するのではなく [`/events`](/ja/reference/skills/events/)、[`/logs`](/ja/reference/skills/logs/)、または [`/investigate`](/ja/reference/skills/investigate/) に渡します。
+
+---
+
+## オプション
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>キャッシュをバイパスしてAPIから新鮮なデータを取得します。</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>キャッシュされたスナップショットがこれより古い場合にのみ再取得します（kubectlスタイル：<code>5m</code>、<code>1h</code>、<code>24h</code>）。デフォルト：<code>15m</code>。<code>--refresh</code> が設定されている場合は無視されます。</dd>
+</dl>
+
+[概要](/ja/reference/skills/overview/)のグローバルフラグも適用されます。

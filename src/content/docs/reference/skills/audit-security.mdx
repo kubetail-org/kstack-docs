@@ -1,0 +1,63 @@
+---
+title: /audit-security
+description: RBAC review, pod security posture, and privilege-tightening recommendations.
+---
+
+The `/audit-security` skill looks for over-privileged identities and workloads: `ServiceAccounts` with more access than they use, pods running as root or with host-level escapes, and bindings that grant cluster-wide power where a namespace-scoped role would do.
+
+Run it without arguments for a full sweep, or name a workflow to scope the report.
+
+```text
+/audit-security                    # full sweep
+/audit-security rbac               # single workflow
+/audit-security pods in kube-system
+```
+
+Natural-language scoping (namespaces, label selectors, workload names) is supported on every workflow (see [Overview](/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. RBAC
+
+:::note[Checks]
+- ClusterRoles and Roles granting wildcard verbs or resources (`*`)
+- Bindings to `cluster-admin` and other high-power built-in roles
+- `RoleBinding` and `ClusterRoleBinding` referencing subjects that no longer exist
+:::
+
+Sources: Kubernetes API.
+
+### 2. Pod security
+
+:::note[Checks]
+- Containers running as root, with no `securityContext`, or with `allowPrivilegeEscalation: true`
+- Pods with `privileged: true`, `hostNetwork`, `hostPID`, or `hostIPC`
+- Writable root filesystems and dangerous Linux capabilities (`SYS_ADMIN`, `NET_ADMIN`, etc.)
+- Missing `seccompProfile` and workloads failing the Pod Security Standards `baseline` or `restricted` profiles
+:::
+
+Sources: Kubernetes API, evaluated against the upstream [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
+
+### 3. Secrets & ServiceAccount tokens
+
+:::note[Checks]
+- Orphaned secrets with no consumer
+- Pods with `automountServiceAccountToken` enabled whose SA has no RoleBindings
+- Long-lived legacy `kubernetes.io/service-account-token` Secrets still present on the cluster
+:::
+
+Sources: Kubernetes API.
+
+---
+
+## What the agent is told
+
+Beyond the workflows, the skill briefs the agent on how to report:
+
+- Rank findings by blast radius — cluster-scoped wildcards above namespace-scoped ones, host escapes above missing seccomp profiles.
+- Be explicit that RBAC checks are **static**: they find what `Roles` grant, not what subjects actually use. Detecting truly unused permissions requires audit-log analysis, which this skill does not do.
+- Reference `Secret` objects by name, namespace, and type only — never read or surface contents.
+- Explain why a finding matters in one line (what the privilege enables) rather than only naming the offending verb or flag.
+- Hand off to [`/investigate`](/reference/skills/investigate/) for a specific workload and [`/audit-network`](/reference/skills/audit-network/) for mTLS and mesh posture, which sits adjacent to pod security.

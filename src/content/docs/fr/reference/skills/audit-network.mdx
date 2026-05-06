@@ -1,0 +1,81 @@
+---
+title: /audit-network
+description: "NetworkPolicy, Service, Ingress, Gateway API, DNS et vérifications de chiffrement."
+---
+
+Le Skill `/audit-network` recherche les éléments défaillants ou manquants dans le réseau du cluster : instances `NetworkPolicy` qui ne correspondent à rien, instances `Service` sans endpoints, routes `Ingress` et `GatewayAPI` qui ne se résolvent pas, problèmes DNS, et workloads communiquant en clair alors qu'un mesh est disponible.
+
+Exécutez-la sans arguments pour un balayage complet, ou nommez un workflow pour affiner le rapport.
+
+```text
+/audit-network                         # full sweep
+/audit-network policies                # single workflow
+/audit-network ingress in prod
+```
+
+Le ciblage en langage naturel (namespaces, sélecteurs de labels, noms de workloads) est pris en charge sur chaque workflow (voir [Overview](/fr/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. NetworkPolicy
+
+:::note[Vérifications]
+- Namespaces sans règle de refus par défaut et pods non couverts par aucune politique
+- Politiques dont le `podSelector` ou les sélecteurs de pairs ne correspondent à aucun pod ou namespace
+- Règles référençant des ports ou protocoles que les pods cibles n'exposent pas
+:::
+
+Sources : API Kubernetes.
+
+### 2. Service
+
+:::note[Vérifications]
+- Services avec zéro endpoint prêt
+- Incompatibilités `selector`/labels de pods et `port`/`targetPort`
+- Services headless (`clusterIP: None`) non associés à un StatefulSet
+:::
+
+Sources : API Kubernetes.
+
+### 3. Ingress & GatewayAPI
+
+:::note[Vérifications]
+- Collisions de noms d'hôtes entre Ingresses ou routes Gateway
+- Entrées TLS référençant des Secrets manquants ou expirés
+- Backends pointant vers des Services inexistants ou sans endpoints
+:::
+
+Sources : API Kubernetes, incluant `gateway.networking.k8s.io` lorsque les CRDs sont installés.
+
+### 4. DNS
+
+:::note[Vérifications]
+- Santé des pods CoreDNS et redémarrages récents
+- Taux NXDOMAIN ou SERVFAIL élevés dans les métriques CoreDNS
+- Domaines stub et forwarders dans le ConfigMap CoreDNS qui ne se résolvent pas
+:::
+
+Sources : le `Deployment` CoreDNS, son `ConfigMap`, et ses métriques Prometheus lorsqu'exposées.
+
+### 5. Chiffrement & mTLS
+
+:::note[Vérifications]
+- Workloads en dehors de la couverture sidecar ou ambiante du mesh
+- Namespaces ou workloads en mode mTLS permissif (plaintext autorisé)
+:::
+
+Sources : CRDs Istio, Linkerd ou Cilium — s'exécute uniquement lorsque l'un de ces meshes est détecté.
+
+---
+
+## Ce qui est communiqué à l'agent
+
+Au-delà des workflows, le Skill instruit l'agent sur la manière de cibler et présenter les résultats :
+
+- Ignorer les workflows mesh et Gateway API si les CRDs correspondants ne sont pas installés — l'absence n'est pas un constat.
+- Pour les vérifications TLS, noter explicitement quand le contenu du Secret ne peut pas être lu en raison du RBAC plutôt que de signaler un faux « expiré ».
+- Pour les sondes DNS actives, indiquer la source de la sonde (pod in-cluster utilisé pour la résolution) afin que les échecs puissent être interprétés correctement.
+- Regrouper les résultats par workflow et inclure les preuves (sélecteurs, endpoints, clés ConfigMap) plutôt que seulement le verdict.
+- Déléguer à [`/logs`](/fr/reference/skills/logs/) pour les logs CoreDNS, ou à [`/investigate`](/fr/reference/skills/investigate/) lorsqu'un workload unique est la cause racine.

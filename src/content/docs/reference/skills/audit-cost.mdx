@@ -1,0 +1,65 @@
+---
+title: /audit-cost
+description: Resource waste and right-sizing recommendations.
+---
+
+The `/audit-cost` skill looks for workloads that are over-provisioned.
+
+Run it without arguments for a full sweep, or name a workflow to scope the report.
+
+```text
+/audit-cost                      # full sweep
+/audit-cost requests             # single workflow
+/audit-cost idle in staging
+```
+
+Natural-language scoping (namespaces, label selectors, workload names) is supported on every workflow (see [Overview](/reference/skills/overview/)).
+
+---
+
+## Workflows
+
+### 1. CPU & memory requests vs. actual usage
+
+:::note[Checks]
+- Containers where `resources.requests` is significantly higher than observed p95 usage
+- Containers with no `resources.requests` set at all
+- Containers hitting their memory limit (OOMKills in the window)
+:::
+
+Sources: `metrics-server` for live usage and Prometheus when detected for historical p95.
+
+### 2. Idle workloads
+
+:::note[Checks]
+- Deployments and StatefulSets with zero traffic and near-zero CPU over the window
+- Jobs and CronJobs that have been failing or suspended long enough to be forgotten
+:::
+
+Sources: `metrics-server` and the Kubernetes API for Job/CronJob status.
+
+### 3. Unused storage & load balancers
+
+:::note[Checks]
+- PersistentVolumes in `Released` state, and PVCs bound but not mounted by any pod
+- `Service` objects of type `LoadBalancer` with no endpoints
+:::
+
+Sources: Kubernetes API.
+
+---
+
+## Window
+
+Right-sizing needs history. By default the skill looks back 7 days when Prometheus is available, and falls back to the live `metrics-server` snapshot when it isn't. The report always states which source was used and how far back the data goes.
+
+---
+
+## What the agent is told
+
+Beyond the workflows themselves, the skill briefs the agent on how to report:
+
+- State the source (`metrics-server` for live, Prometheus for history) and the effective lookback in the header — Prometheus retention may be shorter than the default 7 days.
+- Mark findings that require Prometheus as "not available" when only `metrics-server` is present, rather than silently dropping them.
+- Only flag requests-vs-usage gaps that are large enough to matter in practice; small deltas are noise.
+- Hand off to [`/metrics`](/reference/skills/metrics/) when the user wants to see the underlying series for a specific workload.

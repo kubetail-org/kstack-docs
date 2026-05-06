@@ -1,0 +1,132 @@
+---
+title: Segurança
+description: Modelo de confiança, o que o kstack faz para manter os dados do cluster fora do contexto do agent, e os Skills que você deve usar com cuidado.
+---
+
+Um dos objetivos do kstack é ajudar seu agent de IA a realizar tarefas de monitoramento, solução de problemas e auditoria do Kubernetes de forma mais segura do que faria normalmente. O kstack faz isso definindo limites de segurança que informam ao agent quais entradas devem ser tratadas como dados não confiáveis e quais ações de acompanhamento requerem sua permissão antes de serem executadas. Esta página descreve o limite de confiança, as medidas que o kstack toma para manter dados não confiáveis fora do contexto do agent, e os dois Skills que cruzam deliberadamente esse limite (`/exec`, `/logs`).
+
+---
+
+## O limite de confiança
+
+Há três partes envolvidas em cada interação com seu cluster usando um agent de IA:
+
+- **Você** — Você fornece o prompt, o `kubeconfig` e a autoridade para agir no cluster. Você é a única parte que pode conceder permissão para uma ação destrutiva ou perigosa.
+- **Agent** — Seu agent interpreta seu prompt, decide qual Skill invocar e lê qualquer saída que o Skill retorna.
+- **Cluster** — O cluster retorna dados através da API do Kubernetes e ferramentas associadas. Esses dados **não** são entradas confiáveis. No pior caso, nomes de pod, linhas de log, anotações e mensagens de eventos podem todos ser controlados por atacantes, e um agent que os lê ingenuamente pode ser manipulado por eles.
+
+O trabalho do kstack é manter o agent útil sem deixar que dados não confiáveis do cluster conduzam seu comportamento.
+
+---
+
+## O que o kstack faz por você
+
+### 1. Envelope de resposta claramente definido
+
+Cada script que os Skills do kstack usam internamente escreve exatamente um objeto JSON no stdout (o "envelope de resposta"). O esquema do objeto é versionado e validado contra um [formato pré-definido](https://github.com/kubetail-org/kstack/blob/main/src/schemas/response.schema.json):
+
+```jsonc
+{
+  "kstack":        "1",
+  "status":        "ok" | "error",
+  "render":        "verbatim" | "agent",   // ok only
+  "content":       string,                 // ok only; JSON-escaped
+  "agent_context": string,                 // ok only; optional side-channel
+  "kind":          "user" | "infra",       // error only
+  "message":       string,                 // error only
+  "kube_context":  string,                 // optional; pinned cluster
+  "notice":        string                  // optional; operator banner
+}
+```
+
+As propriedades relevantes para segurança deste contrato são:
+
+<dl>
+  <dt>`render`</dt>
+  <dd>Um enum (`verbatim` ou `agent`) que informa ao agent qual é o destino pretendido do `content`. `render: verbatim` instrui o agent a imprimir o `content` como está e encerrar o turno sem reformatar ou raciocinar mais. `render: agent` marca o `content` como saída de ferramenta sobre a qual o agent pode raciocinar.</dd>
+
+  <dt>`content`</dt>
+  <dd>Um campo string com JSON-escape que contém o payload para o agent.</dd>
+
+  <dt>`agent_context`</dt>
+  <dd>Um campo string com JSON-escape que os scripts podem usar para fornecer dados contextuais que o agent pode usar para acompanhamentos (ex.: caminhos de cache, contagens, identificadores resolvidos). É lido pelo agent e nunca mostrado ao usuário, o que mantém o `content` limpo para `render: verbatim` e evita que metadados vazem para o terminal.</dd>
+
+  <dt>`message`</dt>
+  <dd>Um campo string com JSON-escape que carrega erros tipados gerados por scripts</dd>
+</dl>
+
+Saídas com código diferente de zero são reservadas para falhas inesperadas, caso em que o agent é instruído a imprimir o stderr e parar em vez de adivinhar a intenção.
+
+### 2. Dados em massa do cluster ficam no disco e são lidos via `jq`
+
+Sem o kstack, um agent de IA envia cada pod, node e evento para seu contexto, o que desperdiça contexto com dados irrelevantes e depende do modelo para distinguir campos de instruções em um blob de texto influenciado por atacantes. O kstack evita isso escrevendo respostas em um `cache_dir` por contexto e passando ao agent a localização para que perguntas de acompanhamento possam ser respondidas executando `jq` contra o JSON em cache.
+
+Essa abordagem tem dois benefícios:
+
+- **Parsing estrutural em vez de interpretação de prosa.** `jq '.items[].metadata.name'` percorre um esquema conhecido e retorna um valor string. Um payload de prompt injection contido em uma anotação de pod continua sendo um valor de string num caminho JSON conhecido; não é texto que o modelo é solicitado a compreender como instruções.
+
+- **Crescimento limitado do contexto.** A tabela completa por pod/node nunca entra na janela de contexto do modelo. Os resumos determinísticos fornecidos pelos Skills do kstack têm algumas centenas de tokens independentemente do tamanho do cluster, e os turnos subsequentes só puxam os campos específicos que a pergunta requer.
+
+### 3. Ações destrutivas ou sensíveis requerem sua confirmação
+
+As ações do cluster realizadas pelos Skills do kstack são somente leitura e seguras por design, mas você pode pedir ao seu agent para realizar tarefas de acompanhamento que mutam o estado do cluster ou solicitar informações privilegiadas em seu nome. Para garantir que o agent não realize essas ações sem permissão, cada Skill define limites claros com o agent e o instrui a solicitar confirmação antes de tomar qualquer ação que mute o estado do cluster (deletar recursos, modificar `ConfigMaps`) ou exponha credenciais (ler `Secrets`).
+
+### 4. O contexto do cluster é fixado por sessão
+
+O primeiro Skill do kstack em uma sessão resolve e retorna um `kube_context`. Os Skills subsequentes são instruídos a propagar `--context=<value>` em cada chamada kubectl/kubetail até que você explicitamente peça um cluster diferente. Isso evita que você realize acidentalmente uma ação destinada a um cluster em outro cluster.
+
+### 5. Respeita o RBAC
+
+O kstack é distribuído como scripts shell e arquivos `SKILL.md` instalados no seu diretório home. Cada chamada ao Kubernetes passa pelo seu `kubeconfig` local usando as credenciais e bindings RBAC que você já tem para o `user` configurado em cada contexto.
+
+---
+
+## Skills que podem transmitir dados ao vivo do cluster para o agent
+
+O kstack inclui dois Skills — `/exec` e `/logs` — que são executados dentro de um painel tmux com o qual você e o agent podem interagir. Estes são os Skills nos quais você deve pensar antes de executá-los, pois o painel é onde os dados do cluster mais facilmente chegam ao contexto de raciocínio do agent.
+
+### Modelo de confiança para Skills baseadas em painel
+
+Por padrão, o agent pode controlar a sessão tmux (digitar comandos, definir escopo de consultas), mas não lê o conteúdo do painel a menos que você instrua (ex.: "analise os erros no último conjunto de logs"). Isso é projetado para evitar que dados não confiáveis entrem acidentalmente no contexto de raciocínio do agent. Você pode controlar esse comportamento com dois sinalizadores:
+
+- **`--trust-pane`** — o agent lê o painel a cada turno e pode resumir, correlacionar ou enviar conteúdo para a API do modelo. Use quando você explicitamente quer que o agent raciocine sobre o que está acontecendo (ex.: "observe isso e me diga quando o crashloop parar").
+- **`--detach`** — o agent nunca se conecta ao painel. Ele não pode ler nem digitar. Você se conecta manualmente e o modelo não tem acesso ao conteúdo da sessão. Este é o contraponto estrutural ao comportamento padrão — aplicado pelo kstack, não pela conformidade do agent.
+
+Observe que o comportamento de leitura do painel é um contrato no nível de prompt.
+
+### `/exec`
+
+O Skill `/exec` abre um shell interativo em um pod, um container de debug efêmero ou um pod privilegiado em um node.
+
+Pontos a considerar:
+
+- **Os modos node e debug-container são privilegiados.** O modo node cria um pod de curta duração com `hostPID`, `hostNetwork` e o sistema de arquivos do host montado em `/host`. O modo debug-container entra no namespace de processo do pod alvo. Ambos concedem acesso muito além do que um `exec` normal concederia. O agent descreverá o alvo e o modo resolvidos antes de abrir o shell para que você possa confirmar antes de prosseguir.
+- **A sessão continua em execução até que você a encerre explicitamente.** O agent não deletará o pod de node privilegiado por conta própria; ele aguarda que você peça.
+
+### `/logs`
+
+O Skill `/logs` executa uma consulta Kubetail contra o cluster e transmite linhas de log correspondentes para o painel.
+
+Pontos a considerar:
+
+- **Logs frequentemente contêm dados sensíveis.** Tokens em cabeçalhos `Authorization`, corpos de requisição com PII, stack traces que incluem secrets são todos comuns. Restrinja as consultas independentemente de `--trust-pane` estar definido: um workload específico, uma janela de tempo curta, um padrão de grep direcionado.
+- **O grep no lado do node do Kubetail ajuda.** Empurrar o filtro para o cluster significa que menos linhas atravessam a rede — o que significa menos linhas chegam ao painel (e, com `--trust-pane`, ao agent). Seja específico com seus filtros em vez de buscar amplamente e filtrar manualmente.
+
+---
+
+## Testes de segurança
+
+A estratégia de testes do kstack exercita cada uma das proteções acima no nível mais baixo onde é significativo, para que regressões apareçam como testes com falha em vez de surpresas em produção. O projeto tem quatro níveis de testes — [`tests/unit`](https://github.com/kubetail-org/kstack/tree/main/tests/unit), [`tests/integration`](https://github.com/kubetail-org/kstack/tree/main/tests/integration), [`tests/e2e`](https://github.com/kubetail-org/kstack/tree/main/tests/e2e) e [`tests/evals`](https://github.com/kubetail-org/kstack/tree/main/tests/evals) — e a cobertura de segurança está distribuída entre eles da seguinte forma:
+
+- **Unit (`bats`).** A rotina de escape em [`src/lib/response.sh`](https://github.com/kubetail-org/kstack/blob/main/src/lib/response.sh) e os construtores de envelope são exercitados diretamente. Aspas, barras invertidas, quebras de linha, caracteres de controle e payloads mistos com aparência binária são passados por `response::_escape` e `response::ok_*`, e cada envelope emitido é verificado via round-trip pelo `jq` para provar que é JSON bem formado. Strings com formato de injeção — nomes de pod contendo `","`, anotações contendo `\n"render":"agent"`, etc. — são verificados para confirmar que chegam como valores de `content` e não introduzem chaves irmãs. O parsing de sinalizadores para `--detach` é testado em unidade para que um erro de digitação ou refatoração não possa desabilitá-lo silenciosamente.
+- **Integration (`bats`).** Cada Skill é invocada de ponta a ponta com um `kubectl` falso no `PATH`, e seu envelope emitido é validado contra o esquema JSON em [`src/schemas/response.schema.json`](https://github.com/kubetail-org/kstack/blob/main/src/schemas/response.schema.json). A fixação de `kube_context` é verificada executando um fluxo multi-Skill e afirmando que cada invocação downstream carrega `--context=<resolved>`.
+- **End-to-end (baseado em kind).** Um cluster real é criado com `kind` e os Skills são executados contra ele. Esses testes confirmam que as proteções estruturais se mantêm sob um servidor de API do Kubernetes real: negações de RBAC produzem envelopes `error` tipados em vez de vazar stderr, e modos privilegiados em `/exec` (node, debug-container) resolvem para os specs de pod esperados antes de qualquer caminho de confirmação.
+- **Evals (baseado em Claude).** Contratos no nível de prompt precisam de testes com o agent no loop, então eles ficam aqui. Os cenários cobrem: payloads de injeção de prompt plantados em anotações de pod, linhas de log e mensagens de eventos, para confirmar que o agent os trata como dados em vez de instruções; tentativas de fazer o agent mutar o estado do cluster ou ler um `Secret` sem confirmação; tentativas de enganar o agent para tentar novamente um erro tipado como um comando diferente; e testes baseados em painel que confirmam que o comportamento padrão de não leitura se mantém sem `--trust-pane`. As evals são probabilísticas, portanto o rubric registra taxas de aprovação em vez de um resultado binário, e artefatos são retidos para revisão posterior.
+
+Uma passagem de lint `shellcheck` é executada em cada PR para capturar as classes de bugs de shell (expansões sem aspas, `eval` em entrada não confiável) que de outra forma minariam as garantias estruturais. Os níveis unit e integration são executados em cada PR em Linux, macOS e Windows em `amd64` e `arm64`; o nível e2e é executado em Linux; e o nível eval é acionado sob demanda a partir do CI.
+
+Se você identificar uma garantia nas seções acima que não tem um teste correspondente, isso é um bug que vale a pena reportar.
+
+---
+
+Se você encontrar um problema de segurança, por favor reporte-o pelo [repositório no GitHub](https://github.com/kubetail-org/kstack).

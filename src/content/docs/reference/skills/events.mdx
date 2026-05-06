@@ -1,0 +1,99 @@
+---
+title: /events
+description: Recent cluster events, grouped by reason and ranked by severity so the signal isn't drowned in `Pulled`/`Created`/`Started` noise.
+---
+
+The `/events` skill pulls recent Kubernetes events and collapses them into a short, ranked list — `Warning` events first, then anything notable in `Normal`. It is read-only and never mutates cluster state.
+
+The output is deliberately bounded so the first response is cheap to read and cheap to re-emit through the model. The full event list is written to a local JSON cache that the agent reads from on follow-up questions, without re-hitting the API.
+
+```text
+/events                            # snapshot (uses cache if fresh)
+/events --refresh                  # force a fresh fetch
+/events --ttl 5m                   # only re-fetch if older than 5m
+```
+
+This skill takes no positional arguments. Follow-up questions ("only payments", "events on pod/checkout-7c9", "show me the suppressed Normal events") are answered from the cache — see [Follow-ups](#follow-ups) below.
+
+---
+
+## What it checks
+
+:::note[Checks]
+- `Warning` events across all namespaces, grouped by `(reason, involvedObject.kind, namespace)`
+- `Normal` events that are usually meaningful — `Killing`, `Preempting`, `NodeNotReady`, `Rebooted`, `FailedScheduling`, etc. — with the chatty ones (`Pulled`, `Created`, `Started`, `Scheduled`, `SuccessfulCreate`) collapsed into a single tail line
+- For each group: count, first/last timestamp, the most recent message, and the involved objects (truncated when there are many)
+:::
+
+Sources: Kubernetes API only — `kubectl get events --all-namespaces` (or the equivalent against `events.k8s.io/v1`), sorted server-side by `lastTimestamp`.
+
+---
+
+## How it works
+
+The skill fetches events for the cluster in a single call and writes the full list to a per-context cache directory as `events.json`. Aggregation and severity ranking happen client-side on that JSON, so repeat runs within the TTL window skip the API entirely.
+
+The summary block looks like this:
+
+```text
+Events: prod-us-east · last 1h · 2 warning groups, 1 notable
+
+WARN  payments/Pod         BackOff             14×  2m ago   "Back-off restarting failed container server in pod checkout-7c9"
+WARN  ingress/Pod          FailedScheduling    1×   38m ago  "0/12 nodes are available: 3 node(s) had untolerated taint…"
+NOTE  kube-system/Node     NodeNotReady        1×   52m ago  "Node ip-10-0-3-14 status is now: NodeNotReady"
+
+…and 412 Normal events (Pulled, Created, Started, Scheduled) suppressed.
+
+Snapshot cached (TTL 5m). Ask to drill in — e.g. "only payments", "events on pod/checkout-7c9", "show suppressed".
+```
+
+When the window is clean, the skill prints a single line confirming there's nothing to report and exits.
+
+---
+
+## Follow-ups
+
+The summary deliberately collapses chatty `Normal` reasons and truncates per-object detail so the initial response stays small. When you ask for more — or anything else that can be answered from the cached event list — the agent reads the cache with `jq` instead of re-running the skill:
+
+```text
+❯ /events
+[ summary... ]
+
+❯ only payments
+[ events filtered to namespace payments, from events.json ]
+
+❯ show the suppressed Normal events
+[ full Normal-event list, from events.json ]
+
+❯ events on pod/checkout-7c9
+[ filtered by involvedObject, walking owners one level up, from events.json ]
+```
+
+For data that isn't in the cache (logs, a specific resource's YAML, root-cause across multiple sources), the agent routes to the right skill — [`/logs`](/reference/skills/logs/) or [`/investigate`](/reference/skills/investigate/) — rather than widening `/events`.
+
+Say "refresh" / "fetch again" / "re-check" and the agent re-invokes the skill with `--refresh`.
+
+---
+
+## What the agent is told
+
+Beyond fetching the event list, the skill briefs the agent on how to behave on follow-ups:
+
+- Prefer answering from the cached `events.json` with `jq` over re-invoking the skill.
+- Treat the chatty reason set (`Pulled`, `Created`, `Started`, `Scheduled`, `SuccessfulCreate`) as collapsible — surface them only when the user asks for the suppressed set.
+- When the user asks about "events on `pod/X`", walk owners one level up (`Pod` → `ReplicaSet` → `Deployment`, `Pod` → `Job` → `CronJob`) so events fired against the controller aren't missed.
+- Hand off to [`/logs`](/reference/skills/logs/) for the container output behind a `BackOff` or `CrashLoopBackOff`, and to [`/investigate`](/reference/skills/investigate/) when a single resource becomes the focus.
+
+---
+
+## Options
+
+<dl>
+  <dt>`--refresh`</dt>
+  <dd>Bypass the cache and fetch fresh data from the API.</dd>
+
+  <dt>`--ttl <duration>`</dt>
+  <dd>Only re-fetch if the cached snapshot is older than this (kubectl-style: <code>1m</code>, <code>5m</code>, <code>1h</code>). Default: <code>5m</code>. Ignored when <code>--refresh</code> is set.</dd>
+</dl>
+
+Global flags from [Overview](/reference/skills/overview/) also apply.

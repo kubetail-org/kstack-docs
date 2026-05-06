@@ -1,0 +1,50 @@
+---
+title: /forget
+description: 'kstack의 로컬 캐시를 지우고 클러스터에 대해 학습한 내용을 삭제합니다.'
+---
+
+`/forget` 스킬은 머신에서 kstack의 로컬 상태를 지웁니다. 시간이 지남에 따라 kstack은 클러스터에 대한 작업 메모리를 구축합니다 — 최근 쿼리 결과, 감지된 통합, 리소스 지문, 이상 항목 감지에 사용하는 기준선. 이 스킬은 에이전트가 깨끗한 상태에서 시작할 수 있도록 해당 데이터를 강제로 지웁니다.
+
+이 스킬은 클러스터의 어떤 항목에도 영향을 미치지 않습니다. 클러스터 자체에서 kstack이 관리하는 리소스를 제거하려면 [`/cleanup`](/ko/reference/skills/cleanup/)을 참조하십시오.
+
+```text
+/forget                      # forget everything for the current context
+/forget --context prod       # forget everything for the 'prod' context
+/forget --all                # forget everything for all contexts
+```
+
+:::note[사용자 호출만 가능]
+`/forget`은 `disable-model-invocation: true`로 제공됩니다. 에이전트는 자체적으로 로컬 상태를 지우지 않습니다 — 캐시된 컨텍스트를 예기치 않게 잃지 않도록 사용자가 명시적으로 `/forget`을 입력할 때만 실행됩니다.
+:::
+
+---
+
+## 지워지는 내용
+
+상태는 kubeconfig 컨텍스트별로 파티션된 `~/.config/kstack/`에 저장됩니다 — `staging`을 삭제해도 `prod`에는 영향을 미치지 않습니다.
+
+:::note[로컬 상태]
+- **캐시** (`~/.config/kstack/cache/<context>/`) — 최근 쿼리 결과, 로그 버퍼, 중복 제거 테이블, 진행 중인 watcher 상태. 재구성 비용이 낮으므로 자유롭게 지울 수 있습니다.
+- **학습된 상태** (`~/.config/kstack/state/<context>/`) — 감지된 통합, 리소스 지문, 기준선, 클러스터별 기본 설정. 다음 사용 시 재구성되지만 완전히 재형성되려면 몇 번의 상호작용이 필요할 수 있습니다.
+:::
+
+기본적으로 스킬은 현재 컨텍스트에 대해 두 가지 모두를 지웁니다.
+
+---
+
+## 실행 시기
+
+- 클러스터가 재구성되거나 마이그레이션되어 이전 ID가 kstack이 기억하는 것과 더 이상 일치하지 않을 때.
+- kstack이 처음부터 다시 학습하기를 원할 때 — 기준선이 오래된 것 같거나 이전 세션에서 잘못된 것을 학습했을 때.
+- 머신을 인계하고 클러스터별 상태를 남기지 않으려 할 때.
+
+---
+
+## 옵션
+
+<dl>
+  <dt>`--all`</dt>
+  <dd>현재 컨텍스트만이 아닌 모든 컨텍스트에 대해 캐시와 학습된 상태를 지웁니다.</dd>
+</dl>
+
+[개요](/ko/reference/skills/overview/)의 글로벌 플래그도 적용됩니다.
