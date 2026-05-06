@@ -9,4 +9,4 @@ Disallow: /cdn-cgi/
 Disallow: /_astro/
 Allow: /
 
-Sitemap: https://kstack.xyz/sitemap-index.xml
+Sitemap: https://kstack.sh/sitemap-index.xml
