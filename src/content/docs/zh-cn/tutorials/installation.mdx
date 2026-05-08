@@ -70,8 +70,10 @@ curl -sS https://kstack.sh/install | bash -s -- --no-prefix
 | Slate            | `--agent slate`    | `~/.slate/skills/`             |
 | Kiro             | `--agent kiro`     | `~/.kiro/skills/`              |
 | Hermes           | `--agent hermes`   | `~/.hermes/skills/`            |
+| Pi               | `--agent pi`       | `~/.pi/agent/skills/`          |
 
-本地安装在项目目录下镜像此结构（如 `<project>/.codex/skills/`）。各代理的注意事项参见[在非 Claude 代理中使用 kstack](/zh-cn/guides/non-claude-agents/)。
+
+本地安装在项目目录下镜像此结构（如 `<project>/.codex/skills/`）。Pi 是唯一例外——其本地 skills 目录为 `<project>/.pi/skills/`（不含 `agent/` 段）。各代理的注意事项参见[在非 Claude 代理中使用 kstack](/zh-cn/guides/non-claude-agents/)。
 
 ### 目录结构
 

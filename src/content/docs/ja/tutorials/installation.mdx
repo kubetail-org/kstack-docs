@@ -70,8 +70,10 @@ curl -sS https://kstack.sh/install | bash -s -- --no-prefix
 | Slate            | `--agent slate`       | `~/.slate/skills/`                 |
 | Kiro             | `--agent kiro`        | `~/.kiro/skills/`                  |
 | Hermes           | `--agent hermes`      | `~/.hermes/skills/`                |
+| Pi               | `--agent pi`          | `~/.pi/agent/skills/`              |
 
-ローカルインストールはプロジェクトディレクトリ以下にこの構造を反映します（例：`<project>/.codex/skills/`）。エージェントごとの注意事項については[Claude以外のエージェントでのkstackの使用](/ja/guides/non-claude-agents/)を参照してください。
+
+ローカルインストールはプロジェクトディレクトリ以下にこの構造を反映します（例：`<project>/.codex/skills/`）。Pi だけは例外で、ローカルの skills ディレクトリは `<project>/.pi/skills/` です（`agent/` セグメントなし）。エージェントごとの注意事項については[Claude以外のエージェントでのkstackの使用](/ja/guides/non-claude-agents/)を参照してください。
 
 ### ディレクトリ構造
 
