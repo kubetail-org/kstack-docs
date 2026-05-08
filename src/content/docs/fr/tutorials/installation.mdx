@@ -70,8 +70,10 @@ Par défaut, le bootstrap s'installe dans chaque agent pris en charge qu'il dét
 | Slate            | `--agent slate`    | `~/.slate/skills/`             |
 | Kiro             | `--agent kiro`     | `~/.kiro/skills/`              |
 | Hermes           | `--agent hermes`   | `~/.hermes/skills/`            |
+| Pi               | `--agent pi`       | `~/.pi/agent/skills/`          |
 
-Les installations locales reproduisent cette structure sous le répertoire de projet (ex. `<project>/.codex/skills/`). Voir [Utiliser kstack avec des agents non-Claude](/fr/guides/non-claude-agents/) pour les notes par agent.
+
+Les installations locales reproduisent cette structure sous le répertoire de projet (ex. `<project>/.codex/skills/`). Pi est la seule exception : son répertoire local de skills est `<project>/.pi/skills/` (sans le segment `agent/`). Voir [Utiliser kstack avec des agents non-Claude](/fr/guides/non-claude-agents/) pour les notes par agent.
 
 ### Structure des répertoires
 
