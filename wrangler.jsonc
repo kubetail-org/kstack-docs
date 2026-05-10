@@ -4,6 +4,10 @@
 		{
 			"pattern": "kstack.sh",
 			"custom_domain": true
+		},
+		{
+			"pattern": "www.kstack.sh",
+			"custom_domain": true
 		}
 	],
 	"compatibility_date":"2026-04-14",
